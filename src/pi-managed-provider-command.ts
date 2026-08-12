@@ -6,10 +6,14 @@ import {
   parseManualProviderModelIds,
   validateManagedProviderApiKey,
   validateProviderDisplayName,
-  validateProviderProtocolPattern,
+  validateProviderProtocolWildcardPattern,
 } from "./pi-managed-provider-contracts.js";
 import { applyPiManagedProviderConnectionInput } from "./pi-managed-provider-edit.js";
-import { normalizeProviderRootUrl } from "./pi-managed-provider-routing.js";
+import {
+  isProviderProtocolWildcardPattern,
+  normalizeProviderRootUrl,
+  retainManagedProviderProtocolRulesForModels,
+} from "./pi-managed-provider-routing.js";
 import {
   formatManagedProviderApi,
   promptPiManagedProviderSecret,
@@ -33,13 +37,17 @@ export interface PiManagedProviderCommandOrchestrator {
 async function chooseManagedProviderApi(
   context: ExtensionCommandContext,
   current?: SupportedProviderApi,
+  fallback = false,
 ): Promise<SupportedProviderApi | "keep" | undefined> {
   const options = [
     ...(current ? [`Keep current · ${formatManagedProviderApi(current)}`] : []),
     formatManagedProviderApi("anthropic-messages"),
     formatManagedProviderApi("openai-responses"),
   ];
-  const choice = await context.ui.select("Request protocol", options);
+  const choice = await context.ui.select(
+    fallback ? "Default protocol · fallback when no model rule matches" : "Request protocol",
+    options,
+  );
   if (!choice) return undefined;
   if (choice.startsWith("Keep current")) return "keep";
   return choice.startsWith("Anthropic") ? "anthropic-messages" : "openai-responses";
@@ -114,7 +122,7 @@ async function addManagedProvider(
   const apiKeyInput = await promptPiManagedProviderSecret(context, "API key", "Enter the provider API key");
   if (apiKeyInput === undefined) return;
   const apiKey = validateManagedProviderApiKey(apiKeyInput);
-  const defaultApi = await chooseManagedProviderApi(context);
+  const defaultApi = await chooseManagedProviderApi(context, undefined, true);
   if (!defaultApi || defaultApi === "keep") return;
   const source = await chooseManagedProviderModelSource(context);
   if (!source) return;
@@ -132,8 +140,12 @@ async function addManagedProvider(
     : await discoverManagedProviderModelsWithUi(context, orchestrator, provider, apiKey);
   if (!modelIds) return;
   provider = { ...provider, modelSource: { type: source, modelIds } };
-  if (await context.ui.confirm("Protocol exceptions", "Add model-specific protocol rules before saving?")) {
-    const protocolRules = await collectManagedProviderProtocolRules(context, provider.protocolRules);
+  if (await context.ui.confirm("Protocol routing", "Add exact model settings or wildcard fallbacks before saving?")) {
+    const protocolRules = await collectManagedProviderProtocolRules(
+      context,
+      provider.modelSource.modelIds,
+      provider.protocolRules,
+    );
     if (!protocolRules) return;
     provider = { ...provider, protocolRules };
   }
@@ -147,6 +159,29 @@ async function addManagedProvider(
   context.ui.notify(`Added ${provider.name}`, "info");
 }
 
+export async function saveManagedProviderAndRestoreActiveModel(
+  pi: ExtensionAPI,
+  context: ExtensionCommandContext,
+  orchestrator: PiManagedProviderCommandOrchestrator,
+  previousProvider: ManagedProviderDefinition,
+  nextProvider: ManagedProviderDefinition,
+  options: { apiKey?: string },
+): Promise<void> {
+  const activeModelId = context.model?.provider === previousProvider.id ? context.model.id : undefined;
+  if (activeModelId && !nextProvider.modelSource.modelIds.includes(activeModelId)) {
+    throw new Error(`Keep the active model ${activeModelId} in this provider, or switch models before removing it`);
+  }
+  await orchestrator.saveProvider(pi, nextProvider, options);
+  if (!activeModelId) return;
+  const refreshedModel = context.modelRegistry.find(nextProvider.id, activeModelId);
+  if (!refreshedModel) {
+    throw new Error(`Updated ${nextProvider.name}, but PI could not reload the active model ${activeModelId}`);
+  }
+  if (!(await pi.setModel(refreshedModel))) {
+    throw new Error(`Updated ${nextProvider.name}, but PI could not reselect the active model ${activeModelId}`);
+  }
+}
+
 async function editManagedProviderConnection(
   pi: ExtensionAPI,
   context: ExtensionCommandContext,
@@ -158,7 +193,7 @@ async function editManagedProviderConnection(
   const keyStatus = orchestrator.hasConfiguredApiKey(provider.id) ? "Configured" : "Not configured";
   const apiKeyInput = await promptPiManagedProviderSecret(context, "API key", `${keyStatus} · Enter keeps current`);
   if (apiKeyInput === undefined) return;
-  const defaultApi = await chooseManagedProviderApi(context, provider.defaultApi);
+  const defaultApi = await chooseManagedProviderApi(context, provider.defaultApi, true);
   if (defaultApi === undefined) return;
   const result = applyPiManagedProviderConnectionInput(provider, {
     rootUrl: rootUrlInput,
@@ -181,7 +216,14 @@ async function editManagedProviderConnection(
     `URL: ${nextProvider.rootUrl}\nProtocol: ${formatManagedProviderApi(nextProvider.defaultApi)}\nAPI key: ${result.apiKey ? "updated" : "unchanged"}`,
   );
   if (!confirmed) return;
-  await orchestrator.saveProvider(pi, nextProvider, result.apiKey ? { apiKey: result.apiKey } : {});
+  await saveManagedProviderAndRestoreActiveModel(
+    pi,
+    context,
+    orchestrator,
+    provider,
+    nextProvider,
+    result.apiKey ? { apiKey: result.apiKey } : {},
+  );
   context.ui.notify(`Updated ${provider.name}`, "info");
 }
 
@@ -197,53 +239,96 @@ async function manageManagedProviderModelSource(
     ? await collectManualManagedProviderModels(context, provider.modelSource.type === "manual" ? provider.modelSource.modelIds : [])
     : await discoverManagedProviderModelsWithUi(context, orchestrator, provider);
   if (!modelIds) return;
-  await orchestrator.saveProvider(pi, { ...provider, modelSource: { type: source, modelIds } }, {});
+  await saveManagedProviderAndRestoreActiveModel(
+    pi,
+    context,
+    orchestrator,
+    provider,
+    {
+      ...provider,
+      modelSource: { type: source, modelIds },
+      protocolRules: retainManagedProviderProtocolRulesForModels(provider.protocolRules, modelIds),
+    },
+    {},
+  );
   context.ui.notify(`Updated models for ${provider.name}`, "info");
 }
 
 async function collectManagedProviderProtocolRules(
   context: ExtensionCommandContext,
+  modelIds: readonly string[],
   initialRules: ManagedProviderDefinition["protocolRules"],
 ): Promise<ManagedProviderDefinition["protocolRules"] | undefined> {
-  let rules = [...initialRules];
+  let exactRules = initialRules.filter(
+    (rule) => !isProviderProtocolWildcardPattern(rule.pattern) && modelIds.includes(rule.pattern),
+  );
+  let wildcardRules = initialRules.filter((rule) => isProviderProtocolWildcardPattern(rule.pattern));
   for (;;) {
-    const ruleLabels = rules.map((rule, index) => `${index + 1}. ${rule.pattern} → ${formatManagedProviderApi(rule.api)}`);
-    const choice = await context.ui.select("Protocol exceptions", [
-      "Add rule",
-      ...ruleLabels,
+    const exactLabels = exactRules.map((rule) => `Model · ${rule.pattern} → ${formatManagedProviderApi(rule.api)}`);
+    const wildcardLabels = wildcardRules.map((rule, index) => `Fallback ${index + 1} · ${rule.pattern} → ${formatManagedProviderApi(rule.api)}`);
+    const choice = await context.ui.select("Protocol routing · model → fallback pattern → default", [
+      "Set protocol for a model",
+      ...exactLabels,
+      "Add fallback pattern",
+      ...wildcardLabels,
       "Save and return",
       "Cancel",
     ]);
     if (!choice || choice === "Cancel") return undefined;
-    if (choice === "Save and return") return rules;
-    if (choice === "Add rule") {
-      const patternInput = await context.ui.input("Model pattern", "Use * and ? wildcards");
-      if (patternInput === undefined) continue;
-      const pattern = validateProviderProtocolPattern(patternInput);
-      if (rules.some((rule) => rule.pattern === pattern)) throw new Error(`Rule already exists: ${pattern}`);
+    if (choice === "Save and return") return [...exactRules, ...wildcardRules];
+    if (choice === "Set protocol for a model") {
+      const available = modelIds.filter((modelId) => !exactRules.some((rule) => rule.pattern === modelId));
+      if (available.length === 0) {
+        context.ui.notify("Every model already has an exact protocol setting", "warning");
+        continue;
+      }
+      const modelId = await context.ui.select("Model", [...available]);
+      if (!modelId) continue;
       const api = await chooseManagedProviderApi(context);
       if (!api || api === "keep") continue;
-      rules.push({ pattern, api });
+      exactRules.push({ pattern: modelId, api });
       continue;
     }
-    const index = ruleLabels.indexOf(choice);
-    if (index < 0) continue;
+    if (choice === "Add fallback pattern") {
+      const input = await context.ui.input("Fallback model pattern", "Must contain * or ?");
+      if (input === undefined) continue;
+      const pattern = validateProviderProtocolWildcardPattern(input);
+      if ([...exactRules, ...wildcardRules].some((rule) => rule.pattern === pattern)) throw new Error(`Rule already exists: ${pattern}`);
+      const api = await chooseManagedProviderApi(context);
+      if (!api || api === "keep") continue;
+      wildcardRules.push({ pattern, api });
+      continue;
+    }
+    const exactIndex = exactLabels.indexOf(choice);
+    if (exactIndex >= 0) {
+      const action = await context.ui.select(choice, ["Change protocol", "Delete", "Back"]);
+      if (action === "Change protocol") {
+        const current = exactRules[exactIndex]!;
+        const api = await chooseManagedProviderApi(context, current.api);
+        if (api !== undefined) exactRules[exactIndex] = { ...current, api: api === "keep" ? current.api : api };
+      } else if (action === "Delete") exactRules.splice(exactIndex, 1);
+      continue;
+    }
+    const wildcardIndex = wildcardLabels.indexOf(choice);
+    if (wildcardIndex < 0) continue;
     const action = await context.ui.select(choice, ["Edit", "Move up", "Move down", "Delete", "Back"]);
     if (!action || action === "Back") continue;
     if (action === "Edit") {
-      const current = rules[index]!;
-      const patternInput = await context.ui.input("Model pattern", `Current: ${current.pattern} · Enter keeps current`);
-      if (patternInput === undefined) continue;
-      const pattern = patternInput.trim() ? validateProviderProtocolPattern(patternInput) : current.pattern;
-      if (rules.some((rule, ruleIndex) => ruleIndex !== index && rule.pattern === pattern)) {
+      const current = wildcardRules[wildcardIndex]!;
+      const input = await context.ui.input("Fallback model pattern", `Current: ${current.pattern} · Enter keeps current`);
+      if (input === undefined) continue;
+      const pattern = input.trim() ? validateProviderProtocolWildcardPattern(input) : current.pattern;
+      if ([...exactRules, ...wildcardRules].some((rule) => rule !== current && rule.pattern === pattern)) {
         throw new Error(`Rule already exists: ${pattern}`);
       }
       const api = await chooseManagedProviderApi(context, current.api);
-      if (api === undefined) continue;
-      rules[index] = { pattern, api: api === "keep" ? current.api : api };
-    } else if (action === "Delete") rules.splice(index, 1);
-    else if (action === "Move up" && index > 0) [rules[index - 1], rules[index]] = [rules[index]!, rules[index - 1]!];
-    else if (action === "Move down" && index < rules.length - 1) [rules[index], rules[index + 1]] = [rules[index + 1]!, rules[index]!];
+      if (api !== undefined) wildcardRules[wildcardIndex] = { pattern, api: api === "keep" ? current.api : api };
+    } else if (action === "Delete") wildcardRules.splice(wildcardIndex, 1);
+    else if (action === "Move up" && wildcardIndex > 0) {
+      [wildcardRules[wildcardIndex - 1], wildcardRules[wildcardIndex]] = [wildcardRules[wildcardIndex]!, wildcardRules[wildcardIndex - 1]!];
+    } else if (action === "Move down" && wildcardIndex < wildcardRules.length - 1) {
+      [wildcardRules[wildcardIndex], wildcardRules[wildcardIndex + 1]] = [wildcardRules[wildcardIndex + 1]!, wildcardRules[wildcardIndex]!];
+    }
   }
 }
 
@@ -253,15 +338,26 @@ async function manageManagedProviderProtocolRules(
   orchestrator: PiManagedProviderCommandOrchestrator,
   provider: ManagedProviderDefinition,
 ): Promise<void> {
-  const rules = await collectManagedProviderProtocolRules(context, provider.protocolRules);
+  const rules = await collectManagedProviderProtocolRules(
+    context,
+    provider.modelSource.modelIds,
+    provider.protocolRules,
+  );
   if (!rules || JSON.stringify(rules) === JSON.stringify(provider.protocolRules)) return;
-  await orchestrator.saveProvider(pi, { ...provider, protocolRules: rules }, {});
-  context.ui.notify(`Updated protocol exceptions for ${provider.name}`, "info");
+  await saveManagedProviderAndRestoreActiveModel(
+    pi,
+    context,
+    orchestrator,
+    provider,
+    { ...provider, protocolRules: rules },
+    {},
+  );
+  context.ui.notify(`Updated protocol routing for ${provider.name}`, "info");
 }
 
-function requireInactiveManagedProvider(context: ExtensionCommandContext, providerId: string): void {
-  if (context.model?.provider === providerId) {
-    throw new Error("Switch to a model from another provider before changing this provider");
+function requireRemovableManagedProvider(context: ExtensionCommandContext, provider: ManagedProviderDefinition): void {
+  if (context.model?.provider === provider.id) {
+    throw new Error(`Cannot delete ${provider.name} while ${context.model.id} is active; switch to another provider first`);
   }
 }
 
@@ -277,16 +373,15 @@ async function manageExistingManagedProvider(
     const choice = await context.ui.select(provider.name, [
       "Edit API URL, key, and protocol",
       "Manage model source",
-      "Manage protocol exceptions",
+      "Manage protocol routing",
       "Refresh discovered models",
       "Delete provider",
       "Back",
     ]);
     if (!choice || choice === "Back") return;
-    requireInactiveManagedProvider(context, provider.id);
     if (choice.startsWith("Edit")) await editManagedProviderConnection(pi, context, orchestrator, provider);
     else if (choice === "Manage model source") await manageManagedProviderModelSource(pi, context, orchestrator, provider);
-    else if (choice === "Manage protocol exceptions") await manageManagedProviderProtocolRules(pi, context, orchestrator, provider);
+    else if (choice === "Manage protocol routing") await manageManagedProviderProtocolRules(pi, context, orchestrator, provider);
     else if (choice === "Refresh discovered models") {
       if (provider.modelSource.type !== "discover") {
         context.ui.notify("This provider uses manual models", "warning");
@@ -294,9 +389,21 @@ async function manageExistingManagedProvider(
       }
       const modelIds = await discoverManagedProviderModelsWithUi(context, orchestrator, provider);
       if (!modelIds) continue;
-      await orchestrator.saveProvider(pi, { ...provider, modelSource: { type: "discover", modelIds } }, {});
+      await saveManagedProviderAndRestoreActiveModel(
+        pi,
+        context,
+        orchestrator,
+        provider,
+        {
+          ...provider,
+          modelSource: { type: "discover", modelIds },
+          protocolRules: retainManagedProviderProtocolRulesForModels(provider.protocolRules, modelIds),
+        },
+        {},
+      );
       context.ui.notify(`Refreshed ${provider.name}`, "info");
     } else if (choice === "Delete provider") {
+      requireRemovableManagedProvider(context, provider);
       const confirmed = await context.ui.confirm("Delete provider?", `${provider.name} and its stored API key will be removed`);
       if (!confirmed) continue;
       await orchestrator.removeProvider(pi, provider.id);

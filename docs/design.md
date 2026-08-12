@@ -28,8 +28,8 @@ A configured provider contains:
 - normalized gateway root URL;
 - manual or discovered model source;
 - manual model identifiers or the last successfully discovered identifier snapshot;
-- default request protocol;
-- ordered protocol exceptions.
+- default fallback request protocol;
+- exact model protocol settings and ordered wildcard fallback rules stored in one protocol-rule list.
 
 ## URL semantics
 
@@ -45,15 +45,17 @@ Discovery accepts the standard `{ "data": [{ "id": "..." }] }` response only. Id
 
 For an exact identifier found in PI's built-in catalog, the extension copies protocol-neutral fields: display name, reasoning flag, thinking level map, input types, context window, and maximum output. Costs remain zero because a gateway route does not prove upstream pricing. When the built-in model already uses the selected protocol, the extension also retains only that protocol's allowed compatibility fields. It never copies provider, URL, headers, or sampling parameters; cross-protocol compatibility fields are discarded.
 
-Unknown identifiers use conservative defaults. Every model receives exactly one final protocol from the first matching ordered glob rule or the provider default.
+Unknown identifiers use conservative defaults. Every model receives exactly one final protocol using three levels: an exact model setting first, the first matching ordered wildcard fallback second, and the provider default last.
 
 ## TUI flow
 
 The `/providers` home screen has a selectable Add provider item followed by a non-selectable configured-provider divider and the provider list.
 
-Editing an existing provider collects URL, key, and default protocol before committing. Empty URL/key values retain their current values. Escape cancels the whole edit. No changed values means no write or provider registration.
+Editing an existing provider collects URL, key, and default fallback protocol before committing. Empty URL/key values retain their current values. Escape cancels the whole edit. No changed values means no write or provider registration.
 
-The provider action screen exposes edit connection, manage model source, manage protocol exceptions, refresh models, and delete. Destructive actions require confirmation.
+The protocol-routing screen selects exact models from the provider's model list and accepts typed patterns only for wildcard fallbacks. Exact settings are not ordered; wildcard fallbacks can be moved and use first-match semantics.
+
+The provider action screen exposes edit connection, manage model source, manage protocol routing, refresh models, and delete. Updating the active provider reselects the same model after registration. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
 
 ## Failure behavior
 

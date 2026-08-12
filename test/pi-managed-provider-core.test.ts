@@ -4,9 +4,11 @@ import {
   discoverManagedProviderModelIds,
   parseManagedProviderCatalogResponse,
 } from "../src/pi-managed-provider-catalog.js";
+import { saveManagedProviderAndRestoreActiveModel } from "../src/pi-managed-provider-command.js";
 import {
   createManagedProviderIdentifier,
   type ManagedProviderDefinition,
+  validateProviderProtocolWildcardPattern,
 } from "../src/pi-managed-provider-contracts.js";
 import { applyPiManagedProviderConnectionInput } from "../src/pi-managed-provider-edit.js";
 import {
@@ -16,6 +18,7 @@ import {
   matchesProviderProtocolPattern,
   normalizeProviderRootUrl,
   resolveProviderModelApi,
+  retainManagedProviderProtocolRulesForModels,
 } from "../src/pi-managed-provider-routing.js";
 import { parseManagedProviderState } from "../src/pi-managed-provider-state-schema.js";
 import { PiManagedProviderHomeComponent } from "../src/pi-managed-provider-tui.js";
@@ -53,12 +56,75 @@ describe("provider URL and routing", () => {
     expect(getProviderApiBaseUrl("https://gateway.example.com/v1", "openai-responses")).toBe("https://gateway.example.com/v1");
   });
 
-  test("uses ordered minimal wildcard rules", () => {
+  test("resolves exact model settings before ordered wildcard fallbacks and the provider default", () => {
     expect(matchesProviderProtocolPattern("gpt-5", "gpt-*")).toBe(true);
     expect(matchesProviderProtocolPattern("gpt-a", "gpt-?")).toBe(true);
     expect(matchesProviderProtocolPattern("gpt-ab", "gpt-?")).toBe(false);
-    expect(resolveProviderModelApi("gpt-5", provider.defaultApi, provider.protocolRules)).toBe("openai-responses");
-    expect(resolveProviderModelApi("claude-opus-4-8", provider.defaultApi, provider.protocolRules)).toBe("anthropic-messages");
+    const rules = [
+      { pattern: "gpt-*", api: "openai-responses" as const },
+      { pattern: "gpt-5", api: "anthropic-messages" as const },
+      { pattern: "*", api: "anthropic-messages" as const },
+    ];
+    expect(resolveProviderModelApi("gpt-5", "openai-responses", rules)).toBe("anthropic-messages");
+    expect(resolveProviderModelApi("gpt-6", "anthropic-messages", rules)).toBe("openai-responses");
+    expect(resolveProviderModelApi("other", "openai-responses", [])).toBe("openai-responses");
+  });
+
+  test("requires wildcards in typed fallback rules", () => {
+    expect(validateProviderProtocolWildcardPattern("gpt-*")).toBe("gpt-*");
+    expect(() => validateProviderProtocolWildcardPattern("gpt-5")).toThrow("choose a model");
+  });
+
+  test("drops exact settings for removed models while retaining wildcard fallbacks", () => {
+    expect(retainManagedProviderProtocolRulesForModels([
+      { pattern: "model-one", api: "anthropic-messages" },
+      { pattern: "model-two", api: "openai-responses" },
+      { pattern: "model-*", api: "openai-responses" },
+    ], ["model-one"])).toEqual([
+      { pattern: "model-one", api: "anthropic-messages" },
+      { pattern: "model-*", api: "openai-responses" },
+    ]);
+  });
+});
+
+describe("active provider updates", () => {
+  test("reselects the active model after updating its provider", async () => {
+    const refreshedModel = { provider: provider.id, id: "claude-opus-4-8", api: "openai-responses" };
+    let savedProvider: ManagedProviderDefinition | undefined;
+    let selectedModel: unknown;
+    await saveManagedProviderAndRestoreActiveModel(
+      { async setModel(model: unknown) { selectedModel = model; return true; } } as never,
+      {
+        model: { provider: provider.id, id: "claude-opus-4-8" },
+        modelRegistry: { find() { return refreshedModel; } },
+      } as never,
+      {
+        async saveProvider(_pi: unknown, nextProvider: ManagedProviderDefinition) { savedProvider = nextProvider; },
+      } as never,
+      provider,
+      { ...provider, defaultApi: "openai-responses" },
+      {},
+    );
+    expect(savedProvider?.defaultApi).toBe("openai-responses");
+    expect(selectedModel).toBe(refreshedModel);
+  });
+
+  test("rejects removing the active model before writing provider state", async () => {
+    let saveCalls = 0;
+    await expect(saveManagedProviderAndRestoreActiveModel(
+      { async setModel() { return true; } } as never,
+      {
+        model: { provider: provider.id, id: "claude-opus-4-8" },
+        modelRegistry: { find() { return undefined; } },
+      } as never,
+      {
+        async saveProvider() { saveCalls += 1; },
+      } as never,
+      provider,
+      { ...provider, modelSource: { type: "manual", modelIds: ["gpt-5.4"] } },
+      {},
+    )).rejects.toThrow("Keep the active model");
+    expect(saveCalls).toBe(0);
   });
 });
 

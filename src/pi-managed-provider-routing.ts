@@ -39,6 +39,10 @@ function escapeProviderRuleCharacter(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&");
 }
 
+export function isProviderProtocolWildcardPattern(pattern: string): boolean {
+  return pattern.includes("*") || pattern.includes("?");
+}
+
 export function matchesProviderProtocolPattern(modelId: string, pattern: string): boolean {
   const expression = [...pattern]
     .map((character) => character === "*" ? ".*" : character === "?" ? "." : escapeProviderRuleCharacter(character))
@@ -46,13 +50,23 @@ export function matchesProviderProtocolPattern(modelId: string, pattern: string)
   return new RegExp(`^${expression}$`, "u").test(modelId);
 }
 
+export function retainManagedProviderProtocolRulesForModels(
+  rules: ManagedProviderDefinition["protocolRules"],
+  modelIds: readonly string[],
+): ManagedProviderDefinition["protocolRules"] {
+  const availableModelIds = new Set(modelIds);
+  return rules.filter((rule) => isProviderProtocolWildcardPattern(rule.pattern) || availableModelIds.has(rule.pattern));
+}
+
 export function resolveProviderModelApi(
   modelId: string,
   defaultApi: SupportedProviderApi,
   rules: ManagedProviderDefinition["protocolRules"],
 ): SupportedProviderApi {
+  const exactRule = rules.find((rule) => !isProviderProtocolWildcardPattern(rule.pattern) && rule.pattern === modelId);
+  if (exactRule) return exactRule.api;
   for (const rule of rules) {
-    if (matchesProviderProtocolPattern(modelId, rule.pattern)) return rule.api;
+    if (isProviderProtocolWildcardPattern(rule.pattern) && matchesProviderProtocolPattern(modelId, rule.pattern)) return rule.api;
   }
   return defaultApi;
 }

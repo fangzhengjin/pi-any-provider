@@ -92,6 +92,14 @@ export function validateProviderProtocolPattern(value: string): string {
   return normalized;
 }
 
+export function validateProviderProtocolWildcardPattern(value: string): string {
+  const pattern = validateProviderProtocolPattern(value);
+  if (!pattern.includes("*") && !pattern.includes("?")) {
+    throw new Error("Fallback pattern must contain * or ?; choose a model for an exact setting");
+  }
+  return pattern;
+}
+
 export function validateManagedProviderApiKey(value: string): string {
   if (!value || CONTROL_CHARACTER_PATTERN.test(value)) {
     throw new Error("API key must be non-empty and contain no control characters");

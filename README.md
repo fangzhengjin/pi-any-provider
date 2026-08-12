@@ -10,7 +10,7 @@ It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses i
 - Multiple custom providers
 - Manual model identifiers or standard `/v1/models` discovery
 - Anthropic Messages and OpenAI Responses
-- One default protocol with ordered `*` and `?` model-pattern exceptions
+- Exact model protocols, ordered `*` and `?` wildcard fallbacks, and one provider fallback protocol
 - Hidden API-key input stored through PI's native credential storage
 - Empty URL or key input keeps the current value
 - Automatic PI built-in capability reuse without cross-protocol compatibility leakage
@@ -55,6 +55,14 @@ The extension derives:
 - Anthropic Messages: `/v1/messages`
 - OpenAI Responses: `/v1/responses`
 
+The protocol selected during setup is the final provider fallback. Routing uses this priority:
+
+1. an exact model setting selected from the provider's model list;
+2. the first matching ordered wildcard fallback containing `*` or `?`;
+3. the provider fallback protocol.
+
+Only wildcard fallbacks require typing a pattern. Exact model settings are always selected from the current model list.
+
 When editing an existing provider:
 
 - submit an empty URL to keep the current URL;
@@ -62,7 +70,7 @@ When editing an existing provider:
 - select “Keep current” to keep the current request protocol;
 - if every value is unchanged, nothing is written or re-registered.
 
-Switch to a model from another provider before editing, refreshing, or deleting the currently active provider.
+The active provider can be edited or refreshed. PI automatically reselects the same model after registration changes. Switch providers only before deleting the active provider or removing the active model from its model list.
 
 ## Model metadata
 

@@ -59,11 +59,19 @@ describe("extension integration", () => {
       };
       await extension(pi);
       const inputs = ["Manual Provider", "https://manual.example.com/v1/", "model-one, model-two"];
-      const selections = ["Anthropic Messages · /v1/messages", "Add model identifiers manually"];
+      const selections = [
+        "Anthropic Messages · /v1/messages",
+        "Add model identifiers manually",
+        "Set protocol for a model",
+        "model-one",
+        "OpenAI Responses · /v1/responses",
+        "Save and return",
+      ];
       let customCall = 0;
       const inputTitles = [];
+      const selectTitles = [];
       const notifications = [];
-      const confirmations = [false, true];
+      const confirmations = [true, true];
       const theme = {
         fg(_color, text) { return text; },
         bg(_color, text) { return text; },
@@ -79,7 +87,7 @@ describe("extension integration", () => {
         ui: {
           theme,
           async input(title) { inputTitles.push(title); return inputs.shift(); },
-          async select() { return selections.shift(); },
+          async select(title) { selectTitles.push(title); return selections.shift(); },
           async confirm() { return confirmations.shift() ?? false; },
           notify(message, type) { notifications.push({ message, type }); },
           custom(factory) {
@@ -109,6 +117,7 @@ describe("extension integration", () => {
         registration: registrations.at(-1),
         mode: (await stat(statePath)).mode & 0o777,
         inputTitles,
+        selectTitles,
         notifications,
       }));
     `;
@@ -120,19 +129,29 @@ describe("extension integration", () => {
     });
     expect(result.exitCode, result.stderr.toString()).toBe(0);
     const output = JSON.parse(result.stdout.toString()) as {
-      state: { providers: Array<{ rootUrl: string; modelSource: { modelIds: string[] } }> };
+      state: {
+        providers: Array<{
+          rootUrl: string;
+          modelSource: { modelIds: string[] };
+          protocolRules: Array<{ pattern: string; api: string }>;
+        }>;
+      };
       stateContainsSecret: boolean;
       storedKey: string;
       registration: { id: string; config: { models: Array<{ id: string }> } };
       mode: number;
       inputTitles: string[];
+      selectTitles: string[];
     };
     expect(output.inputTitles).toEqual(["Provider name", "API URL", "Model identifiers"]);
+    expect(output.selectTitles).toContain("Default protocol · fallback when no model rule matches");
+    expect(output.selectTitles).toContain("Model");
     expect(output.stateContainsSecret).toBe(false);
     expect(output.storedKey).toBe("manual-secret");
     expect(output.state.providers[0]).toMatchObject({
       rootUrl: "https://manual.example.com",
       modelSource: { modelIds: ["model-one", "model-two"] },
+      protocolRules: [{ pattern: "model-one", api: "openai-responses" }],
     });
     expect(output.registration.id).toBe("manual-provider");
     expect(output.registration.config.models.map((model) => model.id)).toEqual(["model-one", "model-two"]);

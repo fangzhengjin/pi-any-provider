@@ -67,7 +67,7 @@ export class PiManagedProviderHomeComponent implements Component {
         const provider = this.providers[index]!;
         const selected = this.selectedIndex === index + 1;
         const keyStatus = this.configuredKeys.has(provider.id) ? "key configured" : "key missing";
-        const description = `${provider.modelSource.modelIds.length} models · ${keyStatus} · ${formatManagedProviderApi(provider.defaultApi)}`;
+        const description = `${provider.modelSource.modelIds.length} models · ${keyStatus} · fallback: ${formatManagedProviderApi(provider.defaultApi)}`;
         lines.push(this.renderSelectableLine(provider.name, selected, width));
         lines.push(truncateToWidth(`    ${formatProviderRootUrlForDisplay(provider.rootUrl)} · ${description}`, width, "…"));
       }
