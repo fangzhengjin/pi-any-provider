@@ -57,7 +57,8 @@ export function createManagedProviderIdentifier(
   displayName: string,
   isUnavailable: (identifier: string) => boolean,
 ): string {
-  const normalizedStem = validateProviderDisplayName(displayName)
+  const normalizedName = validateProviderDisplayName(displayName);
+  const normalizedStem = normalizedName
     .normalize("NFKD")
     .toLowerCase()
     .replace(/\p{M}+/gu, "")
@@ -65,7 +66,9 @@ export function createManagedProviderIdentifier(
     .replace(/^-+|-+$/gu, "")
     .slice(0, 64)
     .replace(/-+$/gu, "");
-  const stem = normalizedStem || "custom-provider";
+  const stem = PROVIDER_ID_PATTERN.test(normalizedName)
+    ? normalizedName
+    : normalizedStem || "custom-provider";
   let identifier = stem;
   for (let suffix = 2; isUnavailable(identifier); suffix += 1) {
     identifier = `${stem}-${suffix}`;

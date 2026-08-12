@@ -30,7 +30,11 @@ const provider: ManagedProviderDefinition = {
 };
 
 describe("provider identifiers", () => {
-  test("derives a readable internal identifier from the display name", () => {
+  test("preserves a display name that is already a valid PI identifier", () => {
+    expect(createManagedProviderIdentifier("TokenHub", () => false)).toBe("TokenHub");
+  });
+
+  test("derives a readable internal identifier when the display name needs normalization", () => {
     expect(createManagedProviderIdentifier("Crème API Gateway", () => false)).toBe("creme-api-gateway");
   });
 
@@ -116,6 +120,10 @@ describe("model catalog", () => {
   });
 
   test("inherits known same-protocol metadata without cross-protocol residue", () => {
+    const deepseek = buildManagedProviderModel(provider, "deepseek-v4-flash");
+    expect(deepseek.api).toBe("anthropic-messages");
+    expect(deepseek.compat).toBeUndefined();
+
     const claude = buildManagedProviderModel(provider, "claude-opus-4-8");
     expect(claude.api).toBe("anthropic-messages");
     expect((claude.compat as Record<string, unknown>).forceAdaptiveThinking).toBe(true);
