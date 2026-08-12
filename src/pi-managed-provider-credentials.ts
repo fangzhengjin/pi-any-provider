@@ -73,6 +73,10 @@ async function removeManagedProviderApiKey(
 }
 
 class PiManagedProviderCredentialAccess {
+  hasStoredCredential(providerId: string): boolean {
+    return readStoredCredential(providerId, PI_MANAGED_PROVIDER_AUTH_PATH) !== undefined;
+  }
+
   isConfigured(providerId: string): boolean {
     return readStoredCredential(providerId, PI_MANAGED_PROVIDER_AUTH_PATH)?.type === "api_key";
   }

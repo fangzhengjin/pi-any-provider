@@ -41,7 +41,9 @@ Run:
 
 The first item adds a provider. Configured providers appear below it.
 
-For each provider, enter a gateway root URL such as:
+Enter a provider name first. The extension creates the internal PI identifier automatically, including a numeric suffix when another provider already uses the same name-derived identifier.
+
+Then enter a gateway root URL such as:
 
 ```text
 https://gateway.example.com

@@ -4,7 +4,10 @@ import {
   discoverManagedProviderModelIds,
   parseManagedProviderCatalogResponse,
 } from "../src/pi-managed-provider-catalog.js";
-import type { ManagedProviderDefinition } from "../src/pi-managed-provider-contracts.js";
+import {
+  createManagedProviderIdentifier,
+  type ManagedProviderDefinition,
+} from "../src/pi-managed-provider-contracts.js";
 import { applyPiManagedProviderConnectionInput } from "../src/pi-managed-provider-edit.js";
 import {
   formatProviderRootUrlForDisplay,
@@ -25,6 +28,17 @@ const provider: ManagedProviderDefinition = {
   defaultApi: "anthropic-messages",
   protocolRules: [{ pattern: "gpt-*", api: "openai-responses" }],
 };
+
+describe("provider identifiers", () => {
+  test("derives a readable internal identifier from the display name", () => {
+    expect(createManagedProviderIdentifier("Crème API Gateway", () => false)).toBe("creme-api-gateway");
+  });
+
+  test("uses a safe fallback and suffixes occupied identifiers", () => {
+    const occupied = new Set(["custom-provider", "custom-provider-2"]);
+    expect(createManagedProviderIdentifier("工作网关", (identifier) => occupied.has(identifier))).toBe("custom-provider-3");
+  });
+});
 
 describe("provider URL and routing", () => {
   test("normalizes a gateway root once for every protocol", () => {

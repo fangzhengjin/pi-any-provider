@@ -31,6 +31,10 @@ class PiManagedProviderOrchestrator {
     return piManagedProviderState.snapshot();
   }
 
+  hasStoredCredential(providerId: string): boolean {
+    return piManagedProviderCredentials.hasStoredCredential(providerId);
+  }
+
   hasConfiguredApiKey(providerId: string): boolean {
     return piManagedProviderCredentials.isConfigured(providerId);
   }

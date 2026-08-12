@@ -2,10 +2,10 @@ import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { BorderedLoader, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition, SupportedProviderApi } from "./pi-managed-provider-contracts.js";
 import {
+  createManagedProviderIdentifier,
   parseManualProviderModelIds,
   validateManagedProviderApiKey,
   validateProviderDisplayName,
-  validateProviderIdentifier,
   validateProviderProtocolPattern,
 } from "./pi-managed-provider-contracts.js";
 import { applyPiManagedProviderConnectionInput } from "./pi-managed-provider-edit.js";
@@ -20,6 +20,7 @@ const PI_MANAGED_PROVIDER_BUILTIN_IDS = new Set<string>(getBuiltinProviders());
 
 export interface PiManagedProviderCommandOrchestrator {
   snapshot(): { providers: ManagedProviderDefinition[] };
+  hasStoredCredential(providerId: string): boolean;
   hasConfiguredApiKey(providerId: string): boolean;
   saveProvider(pi: ExtensionAPI, provider: ManagedProviderDefinition, options: { apiKey?: string }): Promise<void>;
   removeProvider(pi: ExtensionAPI, providerId: string): Promise<void>;
@@ -97,20 +98,16 @@ async function addManagedProvider(
   context: ExtensionCommandContext,
   orchestrator: PiManagedProviderCommandOrchestrator,
 ): Promise<void> {
-  const nameInput = await context.ui.input("Provider name", "Display name");
+  const nameInput = await context.ui.input("Provider name", "For example: Work Gateway");
   if (nameInput === undefined) return;
   const name = validateProviderDisplayName(nameInput);
-  const idInput = await context.ui.input("Provider ID", "Stable ID used in PI");
-  if (idInput === undefined) return;
-  const id = validateProviderIdentifier(idInput);
-  if (
-    orchestrator.snapshot().providers.some((provider) => provider.id === id) ||
-    orchestrator.hasConfiguredApiKey(id) ||
-    PI_MANAGED_PROVIDER_BUILTIN_IDS.has(id) ||
-    context.modelRegistry.getProvider(id)
-  ) {
-    throw new Error(`Provider ID already exists: ${id}`);
-  }
+  const configuredProviderIds = new Set(orchestrator.snapshot().providers.map((provider) => provider.id));
+  const id = createManagedProviderIdentifier(name, (candidate) =>
+    configuredProviderIds.has(candidate) ||
+    orchestrator.hasStoredCredential(candidate) ||
+    PI_MANAGED_PROVIDER_BUILTIN_IDS.has(candidate) ||
+    context.modelRegistry.getProvider(candidate) !== undefined
+  );
   const rootUrlInput = await context.ui.input("API URL", "Gateway root URL, for example https://api.example.com");
   if (rootUrlInput === undefined) return;
   const rootUrl = normalizeProviderRootUrl(rootUrlInput);

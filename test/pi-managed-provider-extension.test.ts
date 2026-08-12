@@ -58,9 +58,10 @@ describe("extension integration", () => {
         registerCommand(_name, options) { command = options; },
       };
       await extension(pi);
-      const inputs = ["Manual Provider", "manual-provider", "https://manual.example.com/v1/", "model-one, model-two"];
+      const inputs = ["Manual Provider", "https://manual.example.com/v1/", "model-one, model-two"];
       const selections = ["Anthropic Messages · /v1/messages", "Add model identifiers manually"];
       let customCall = 0;
+      const inputTitles = [];
       const notifications = [];
       const confirmations = [false, true];
       const theme = {
@@ -77,7 +78,7 @@ describe("extension integration", () => {
         },
         ui: {
           theme,
-          async input() { return inputs.shift(); },
+          async input(title) { inputTitles.push(title); return inputs.shift(); },
           async select() { return selections.shift(); },
           async confirm() { return confirmations.shift() ?? false; },
           notify(message, type) { notifications.push({ message, type }); },
@@ -107,6 +108,7 @@ describe("extension integration", () => {
         storedKey: auth["manual-provider"]?.key,
         registration: registrations.at(-1),
         mode: (await stat(statePath)).mode & 0o777,
+        inputTitles,
         notifications,
       }));
     `;
@@ -123,7 +125,9 @@ describe("extension integration", () => {
       storedKey: string;
       registration: { id: string; config: { models: Array<{ id: string }> } };
       mode: number;
+      inputTitles: string[];
     };
+    expect(output.inputTitles).toEqual(["Provider name", "API URL", "Model identifiers"]);
     expect(output.stateContainsSecret).toBe(false);
     expect(output.storedKey).toBe("manual-secret");
     expect(output.state.providers[0]).toMatchObject({

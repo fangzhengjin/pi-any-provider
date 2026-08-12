@@ -23,8 +23,8 @@ Provider settings live in one internal state file in the PI agent extension sett
 
 A configured provider contains:
 
-- stable provider identifier;
-- display name;
+- stable provider identifier derived automatically from the display name and disambiguated against PI's provider and credential namespaces;
+- display name entered by the user;
 - normalized gateway root URL;
 - manual or discovered model source;
 - manual model identifiers or the last successfully discovered identifier snapshot;

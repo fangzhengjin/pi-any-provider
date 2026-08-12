@@ -53,6 +53,26 @@ export function validateProviderDisplayName(value: string): string {
   return normalized;
 }
 
+export function createManagedProviderIdentifier(
+  displayName: string,
+  isUnavailable: (identifier: string) => boolean,
+): string {
+  const normalizedStem = validateProviderDisplayName(displayName)
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/\p{M}+/gu, "")
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 64)
+    .replace(/-+$/gu, "");
+  const stem = normalizedStem || "custom-provider";
+  let identifier = stem;
+  for (let suffix = 2; isUnavailable(identifier); suffix += 1) {
+    identifier = `${stem}-${suffix}`;
+  }
+  return validateProviderIdentifier(identifier);
+}
+
 export function validateProviderModelIdentifier(value: string): string {
   const normalized = value.trim();
   if (!normalized || CONTROL_CHARACTER_PATTERN.test(normalized)) {
