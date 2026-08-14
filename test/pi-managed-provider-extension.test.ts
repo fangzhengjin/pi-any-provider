@@ -176,6 +176,7 @@ describe("extension integration", () => {
   test("loads isolated state, registers mixed modern protocols, and exposes /providers", async () => {
     const agentDir = await createIsolatedPiAgent();
     const script = `
+      import { readFile } from "node:fs/promises";
       import extension from ${JSON.stringify(join(import.meta.dir, "../src/pi-custom-provider-extension.ts"))};
       const registrations = [];
       const commands = [];
@@ -185,7 +186,8 @@ describe("extension integration", () => {
         registerCommand(name, options) { commands.push({ name, options }); },
       };
       await extension(pi);
-      process.stdout.write(JSON.stringify({ registrations, commands: commands.map((entry) => entry.name) }));
+      const modelsText = await readFile(${JSON.stringify(join(agentDir, "models.json"))}, "utf8");
+      process.stdout.write(JSON.stringify({ registrations, modelsText, commands: commands.map((entry) => entry.name) }));
     `;
     const result = Bun.spawnSync([process.execPath, "-e", script], {
       cwd: join(import.meta.dir, ".."),
@@ -195,7 +197,8 @@ describe("extension integration", () => {
     });
     expect(result.exitCode).toBe(0);
     const output = JSON.parse(result.stdout.toString()) as {
-      registrations: Array<{ id: string; config: { models: Array<{ id: string; api: string; baseUrl: string }> } }>;
+      registrations: Array<{ id: string; config: { models: Array<{ id: string; api: string; baseUrl: string; compat: Record<string, unknown> }> } }>;
+      modelsText: string;
       commands: string[];
     };
     expect(output.commands).toContain("providers");
@@ -204,10 +207,14 @@ describe("extension integration", () => {
     expect(models.find((model) => model.id === "claude-opus-4-8")).toMatchObject({
       api: "anthropic-messages",
       baseUrl: "https://gateway.example.com",
+      compat: { forceAdaptiveThinking: true, supportsTemperature: false, supportsStrictTools: true },
     });
     expect(models.find((model) => model.id === "gpt-5.4")).toMatchObject({
       api: "openai-responses",
       baseUrl: "https://gateway.example.com/v1",
+      compat: { sessionAffinityFormat: "openai", supportsAdditionalTools: false },
     });
+    expect(output.modelsText).toContain('"forceAdaptiveThinking": true');
+    expect(output.modelsText).toContain('"sessionAffinityFormat": "openai"');
   });
 });

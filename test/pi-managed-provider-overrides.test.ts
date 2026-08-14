@@ -126,6 +126,72 @@ describe("native model override orchestration", () => {
     expect(output.backupMode).toBe(0o600);
   });
 
+  test("rolls back startup profile materialization when provider registration fails", async () => {
+    const { agentDir, originalModels } = await createOverrideAgent();
+    const script = `
+      import { readFile } from "node:fs/promises";
+      import { createPiManagedProviderOrchestrator } from ${JSON.stringify(join(import.meta.dir, "../src/pi-managed-provider-orchestrator.ts"))};
+      const orchestrator = createPiManagedProviderOrchestrator();
+      let error;
+      try {
+        await orchestrator.load({
+          registerProvider() { throw new Error("simulated registration failure"); },
+          unregisterProvider() {},
+        });
+      } catch (caught) {
+        error = caught instanceof Error ? caught.message : String(caught);
+      }
+      process.stdout.write(JSON.stringify({
+        error,
+        modelsText: await readFile(${JSON.stringify(join(agentDir, "models.json"))}, "utf8"),
+      }));
+    `;
+    const result = Bun.spawnSync([process.execPath, "-e", script], {
+      cwd: join(import.meta.dir, ".."),
+      env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    const output = JSON.parse(result.stdout.toString()) as { error: string; modelsText: string };
+    expect(output.error).toContain("simulated registration failure");
+    expect(output.modelsText).toBe(originalModels);
+  });
+
+  test("filters ignored discovered models on every refresh", async () => {
+    const { agentDir } = await createOverrideAgent();
+    const script = `
+      import { createPiManagedProviderOrchestrator } from ${JSON.stringify(join(import.meta.dir, "../src/pi-managed-provider-orchestrator.ts"))};
+      const server = Bun.serve({
+        port: 0,
+        fetch() { return Response.json({ data: [{ id: "chat-model" }, { id: "wan-image" }] }); },
+      });
+      const orchestrator = createPiManagedProviderOrchestrator();
+      await orchestrator.load({ registerProvider() {}, unregisterProvider() {} });
+      const provider = {
+        id: "integration-provider",
+        name: "Integration Provider",
+        rootUrl: server.url.toString(),
+        modelSource: { type: "discover", modelIds: ["chat-model"], ignoredModelIds: ["wan-image"] },
+        defaultApi: "anthropic-messages",
+        protocolRules: [],
+      };
+      const modelIds = await orchestrator.discoverProviderModels(provider, {
+        context: { modelRegistry: { async getApiKeyForProvider() { return "test-key"; } } },
+      });
+      server.stop(true);
+      process.stdout.write(JSON.stringify(modelIds));
+    `;
+    const result = Bun.spawnSync([process.execPath, "-e", script], {
+      cwd: join(import.meta.dir, ".."),
+      env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual(["chat-model"]);
+  });
+
   test("persists an explicit language preference without changing provider data", async () => {
     const { agentDir } = await createOverrideAgent();
     const script = `
@@ -171,6 +237,7 @@ describe("native model override orchestration", () => {
       const pi = { registerProvider() {}, unregisterProvider() {}, async setModel() { return true; } };
       const orchestrator = createPiManagedProviderOrchestrator();
       await orchestrator.load(pi);
+      const materializedModels = await readFile(${JSON.stringify(join(agentDir, "models.json"))}, "utf8");
       const context = {
         model: undefined,
         modelRegistry: {
@@ -199,6 +266,7 @@ describe("native model override orchestration", () => {
       process.stdout.write(JSON.stringify({
         error,
         refreshCalls,
+        materializedModels,
         modelsText: await readFile(${JSON.stringify(join(agentDir, "models.json"))}, "utf8"),
       }));
     `;
@@ -212,10 +280,12 @@ describe("native model override orchestration", () => {
     const output = JSON.parse(result.stdout.toString()) as {
       error: string;
       refreshCalls: number;
+      materializedModels: string;
       modelsText: string;
     };
     expect(output.error).toContain("simulated refresh failure");
     expect(output.refreshCalls).toBe(2);
-    expect(output.modelsText).toBe(originalModels);
+    expect(output.modelsText).toBe(output.materializedModels);
+    expect(output.modelsText).not.toBe(originalModels);
   });
 });

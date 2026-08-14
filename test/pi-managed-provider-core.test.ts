@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { streamSimple as streamAnthropicSimple } from "@earendil-works/pi-ai/api/anthropic-messages";
+import { streamSimple as streamOpenAIResponsesSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import { getKeybindings, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { parse } from "jsonc-parser";
 import {
@@ -21,7 +23,9 @@ import {
   matchManagedProviderLanguage,
   resolveManagedProviderLanguageCandidates,
 } from "../src/pi-managed-provider-localization.js";
+import { getManagedProviderCompatOptions } from "../src/pi-managed-provider-model-options.js";
 import {
+  materializeManagedProviderProtocolProfilesInText,
   readManagedProviderCompatOverridesFromText,
   updateManagedProviderModelsJsonText,
 } from "../src/pi-managed-provider-model-overrides.js";
@@ -223,19 +227,84 @@ describe("model catalog", () => {
   test("inherits known same-protocol metadata without cross-protocol residue", () => {
     const deepseek = buildManagedProviderModel(provider, "deepseek-v4-flash");
     expect(deepseek.api).toBe("anthropic-messages");
-    expect(deepseek.compat).toBeUndefined();
+    expect(deepseek.compat).toMatchObject({
+      forceAdaptiveThinking: true,
+      supportsEagerToolInputStreaming: true,
+      supportsTemperature: true,
+    });
+    expect((deepseek.compat as Record<string, unknown>).supportsDeveloperRole).toBeUndefined();
 
     const claude = buildManagedProviderModel(provider, "claude-opus-4-8");
     expect(claude.api).toBe("anthropic-messages");
     expect((claude.compat as Record<string, unknown>).forceAdaptiveThinking).toBe(true);
+    expect((claude.compat as Record<string, unknown>).supportsToolReferences).toBe(true);
     expect((claude.compat as Record<string, unknown>).supportsDeveloperRole).toBeUndefined();
+    const haiku = buildManagedProviderModel(provider, "claude-haiku-4-5");
+    expect((haiku.compat as Record<string, unknown>).supportsToolReferences).toBe(false);
 
     const crossProtocolProvider = { ...provider, defaultApi: "openai-responses" as const, protocolRules: [] };
     const crossProtocol = buildManagedProviderModel(crossProtocolProvider, "claude-opus-4-8");
     expect(crossProtocol.api).toBe("openai-responses");
     expect(crossProtocol.reasoning).toBe(true);
     expect(crossProtocol.contextWindow).toBe(claude.contextWindow);
-    expect(crossProtocol.compat).toBeUndefined();
+    expect(crossProtocol.compat).toMatchObject({
+      supportsDeveloperRole: true,
+      sessionAffinityFormat: "openai",
+      supportsAdditionalTools: false,
+    });
+    expect((crossProtocol.compat as Record<string, unknown>).forceAdaptiveThinking).toBeUndefined();
+  });
+
+  test("materialized Anthropic defaults produce an adaptive max-thinking request", async () => {
+    const model = buildManagedProviderModel(provider, "deepseek-v4-flash");
+    let payload: Record<string, unknown> | undefined;
+    const stream = streamAnthropicSimple(
+      model as never,
+      { systemPrompt: "test", messages: [], tools: [] },
+      {
+        apiKey: "test-key",
+        reasoning: "max",
+        maxRetries: 0,
+        onPayload(value) { payload = value as Record<string, unknown>; },
+        fetch: (async () => new Response('{"error":"stop after payload"}', {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+      },
+    );
+    for await (const _event of stream) { /* consume the expected error event */ }
+    expect(payload).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "max" },
+    });
+  });
+
+  test("materialized Responses defaults produce developer messages and OpenAI affinity headers", async () => {
+    const responsesProvider = { ...provider, defaultApi: "openai-responses" as const, protocolRules: [] };
+    const model = buildManagedProviderModel(responsesProvider, "gpt-5.4");
+    let payload: { input?: Array<{ role?: string }> } | undefined;
+    let headers = new Headers();
+    const stream = streamOpenAIResponsesSimple(
+      model as never,
+      { systemPrompt: "test", messages: [], tools: [] },
+      {
+        apiKey: "test-key",
+        sessionId: "session-1",
+        maxRetries: 0,
+        onPayload(value) { payload = value as { input?: Array<{ role?: string }> }; },
+        fetch: (async (_input, init) => {
+          headers = new Headers(init?.headers);
+          return new Response('{"error":"stop after payload"}', {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }) as typeof fetch,
+      },
+    );
+    for await (const _event of stream) { /* consume the expected error event */ }
+    expect(payload?.input?.[0]?.role).toBe("developer");
+    expect(headers.get("session_id")).toBe("session-1");
+    expect(headers.get("x-client-request-id")).toBe("session-1");
   });
 });
 
@@ -272,7 +341,7 @@ describe("native model overrides", () => {
     });
   });
 
-  test("uses inherit to remove managed fields and prunes empty override nodes", () => {
+  test("removes omitted managed fields and prunes empty override nodes", () => {
     const original = `{
   "providers": {
     "TokenHub": {
@@ -327,6 +396,96 @@ describe("native model overrides", () => {
       "openai-responses",
       { forceAdaptiveThinking: true },
     )).toThrow("does not apply");
+  });
+});
+
+describe("protocol profile materialization", () => {
+  test("covers every compatibility field read by the two PI protocol implementations", () => {
+    expect(getManagedProviderCompatOptions("anthropic-messages").map((option) => option.key)).toEqual([
+      "forceAdaptiveThinking",
+      "supportsTemperature",
+      "supportsStrictTools",
+      "supportsEagerToolInputStreaming",
+      "supportsLongCacheRetention",
+      "supportsCacheControlOnTools",
+      "sendSessionAffinityHeaders",
+      "allowEmptySignature",
+      "supportsToolReferences",
+    ]);
+    expect(getManagedProviderCompatOptions("openai-responses").map((option) => option.key)).toEqual([
+      "supportsDeveloperRole",
+      "sessionAffinityFormat",
+      "supportsStrictMode",
+      "supportsOpenAIGrammarTools",
+      "supportsAdditionalTools",
+      "supportsLongCacheRetention",
+      "supportsExplicitPromptCacheMode",
+      "supportsToolSearch",
+    ]);
+  });
+  test("materializes every protocol default while preserving explicit user values", () => {
+    const original = `{
+  "providers": {
+    "Gateway": {
+      "modelOverrides": {
+        "model-a": { "compat": { "supportsTemperature": false } }
+      }
+    }
+  }
+}`;
+    const updated = materializeManagedProviderProtocolProfilesInText(original, [{
+      providerId: "Gateway",
+      modelId: "model-a",
+      api: "anthropic-messages",
+      defaults: {
+        forceAdaptiveThinking: true,
+        supportsTemperature: true,
+        supportsStrictTools: false,
+        supportsEagerToolInputStreaming: true,
+        supportsLongCacheRetention: true,
+        supportsCacheControlOnTools: true,
+        sendSessionAffinityHeaders: false,
+        allowEmptySignature: false,
+        supportsToolReferences: false,
+      },
+    }]);
+    expect(readManagedProviderCompatOverridesFromText(updated, "Gateway", "model-a")).toEqual({
+      supportsEagerToolInputStreaming: true,
+      supportsLongCacheRetention: true,
+      sendSessionAffinityHeaders: false,
+      supportsCacheControlOnTools: true,
+      supportsTemperature: false,
+      forceAdaptiveThinking: true,
+      allowEmptySignature: false,
+      supportsStrictTools: false,
+      supportsToolReferences: false,
+    });
+  });
+
+  test("replaces protocol-specific fields when a model switches to Responses", () => {
+    const anthropic = updateManagedProviderModelsJsonText(undefined, "Gateway", "model-a", "anthropic-messages", {
+      forceAdaptiveThinking: true,
+      supportsTemperature: false,
+    });
+    const updated = materializeManagedProviderProtocolProfilesInText(anthropic, [{
+      providerId: "Gateway",
+      modelId: "model-a",
+      api: "openai-responses",
+      defaults: {
+        supportsDeveloperRole: true,
+        sessionAffinityFormat: "openai",
+        supportsLongCacheRetention: true,
+        supportsStrictMode: false,
+        supportsOpenAIGrammarTools: false,
+        supportsAdditionalTools: false,
+        supportsExplicitPromptCacheMode: false,
+        supportsToolSearch: false,
+      },
+    }]);
+    const compat = readManagedProviderCompatOverridesFromText(updated, "Gateway", "model-a");
+    expect(compat).toMatchObject({ supportsDeveloperRole: true, sessionAffinityFormat: "openai" });
+    expect(compat.forceAdaptiveThinking).toBeUndefined();
+    expect(compat.supportsTemperature).toBeUndefined();
   });
 });
 
@@ -395,6 +554,9 @@ describe("model protocol capability flow", () => {
               component.handleInput?.("\r");
             } else if (customCall === 2) {
               renders.push(component.render(100), component.render(50));
+              component.handleInput?.("\r");
+            } else if (customCall === 3) {
+              renders.push(component.render(100));
               component.handleInput?.("\x1b");
             } else component.handleInput?.("\x1b");
           });
@@ -406,7 +568,7 @@ describe("model protocol capability flow", () => {
       snapshot() { return { version: 1, language: "en", providers: [testProvider] }; },
       hasConfiguredApiKey() { return true; },
       async readModelOverrides(_providerId: string, modelId: string) {
-        return modelId === "claude-opus-4-8" ? { forceAdaptiveThinking: true } : {};
+        return modelId === "claude-opus-4-8" ? { forceAdaptiveThinking: false } : {};
       },
     };
     await runPiManagedProvidersCommand({} as never, context as never, orchestrator as never);
@@ -415,6 +577,64 @@ describe("model protocol capability flow", () => {
     expect(renders[0]!.join("\n")).toContain("1 custom");
     expect(renders[0]!.join("\n")).toContain("OpenAI Responses");
     expect(renders[1]!.join("\n")).toContain("    Request protocol  Anthropic Messages");
+    const capabilityPage = renders[2]!.join("\n");
+    expect(capabilityPage).toContain("Capability");
+    expect(capabilityPage).toContain("Current setting");
+    expect(capabilityPage).toContain("Force disabled");
+    expect(capabilityPage).toContain("Default (Enabled)");
+    expect(capabilityPage).not.toContain("Effective");
+  });
+});
+
+describe("model removal flow", () => {
+  test("persists a discovered model as ignored and removes its exact protocol rule", async () => {
+    const selections = ["Manage model list", "Back"];
+    let customCall = 0;
+    let savedProvider: ManagedProviderDefinition | undefined;
+    const discoveredProvider: ManagedProviderDefinition = {
+      ...provider,
+      modelSource: { type: "discover", modelIds: ["chat-model", "wan-image"], ignoredModelIds: [] },
+      protocolRules: [{ pattern: "wan-image", api: "openai-responses" }],
+    };
+    const theme = { fg(_color: string, text: string) { return text; }, bold(text: string) { return text; } };
+    const context = {
+      mode: "tui",
+      model: undefined,
+      modelRegistry: { getProvider() { return undefined; } },
+      ui: {
+        theme,
+        async select() { return selections.shift(); },
+        async confirm() { return true; },
+        notify() {},
+        custom(factory: Function) {
+          customCall++;
+          return new Promise((resolve) => {
+            const component = factory({ requestRender() {} }, theme, getKeybindings(), resolve);
+            if (customCall === 1) {
+              component.handleInput?.("\x1b[B");
+              component.handleInput?.("\x1b[B");
+              component.handleInput?.("\r");
+            } else if (customCall === 2) {
+              component.handleInput?.("\x1b[B");
+              component.handleInput?.("\r");
+            } else if (customCall === 3) component.handleInput?.("\r");
+            else component.handleInput?.("\x1b");
+          });
+        },
+      },
+    };
+    const orchestrator = {
+      snapshot() { return { version: 1, language: "en", providers: [savedProvider ?? discoveredProvider] }; },
+      hasConfiguredApiKey() { return true; },
+      async saveProvider(_pi: unknown, next: ManagedProviderDefinition) { savedProvider = next; },
+    };
+    await runPiManagedProvidersCommand({} as never, context as never, orchestrator as never);
+    expect(savedProvider?.modelSource).toEqual({
+      type: "discover",
+      modelIds: ["chat-model"],
+      ignoredModelIds: ["wan-image"],
+    });
+    expect(savedProvider?.protocolRules).toEqual([]);
   });
 });
 
@@ -471,5 +691,24 @@ describe("stored state", () => {
       version: 1,
       providers: [{ ...provider, apiKey: "must-not-be-here" }],
     })).toThrow("unsupported setting");
+    const discovered = parseManagedProviderState({
+      version: 1,
+      providers: [{
+        ...provider,
+        modelSource: { type: "discover", modelIds: ["chat-model"] },
+      }],
+    });
+    expect(discovered.providers[0]?.modelSource).toEqual({
+      type: "discover",
+      modelIds: ["chat-model"],
+      ignoredModelIds: [],
+    });
+    expect(() => parseManagedProviderState({
+      version: 1,
+      providers: [{
+        ...provider,
+        modelSource: { type: "discover", modelIds: ["chat-model"], ignoredModelIds: ["chat-model"] },
+      }],
+    })).toThrow("cannot remain");
   });
 });

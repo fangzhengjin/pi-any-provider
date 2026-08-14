@@ -2,7 +2,10 @@ import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/pro
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition, SupportedProviderApi } from "./pi-managed-provider-contracts.js";
 import { validateProviderModelIdentifier } from "./pi-managed-provider-contracts.js";
-import { filterManagedProviderCompatForApi } from "./pi-managed-provider-model-options.js";
+import {
+  filterManagedProviderCompatForApi,
+  resolveManagedProviderCompatProfile,
+} from "./pi-managed-provider-model-options.js";
 import {
   getProviderApiBaseUrl,
   getProviderDiscoveryUrl,
@@ -25,6 +28,17 @@ function findBuiltinModel(modelId: string, api: SupportedProviderApi) {
   return matches?.find((model) => model.api === api) ?? matches?.[0];
 }
 
+function defaultManagedProviderToolReferences(
+  model: ReturnType<typeof findBuiltinModel>,
+): boolean {
+  if (!model || model.provider !== "anthropic" || model.id.includes("haiku")) return false;
+  const version = model.id.match(/^claude-(?:opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)/u);
+  if (!version) return false;
+  const major = Number(version[1]);
+  const minor = version[2] && version[2].length < 8 ? Number(version[2]) : 0;
+  return major > 4 || (major === 4 && minor >= 5);
+}
+
 export function buildManagedProviderModel(
   provider: ManagedProviderDefinition,
   modelIdInput: string,
@@ -32,21 +46,30 @@ export function buildManagedProviderModel(
   const id = validateProviderModelIdentifier(modelIdInput);
   const api = resolveProviderModelApi(id, provider.defaultApi, provider.protocolRules);
   const builtin = findBuiltinModel(id, api);
-  const compat = builtin?.api === api
+  const baseUrl = getProviderApiBaseUrl(provider.rootUrl, api);
+  const filteredCompat = builtin?.api === api
     ? filterManagedProviderCompatForApi(api, builtin.compat as Record<string, unknown> | undefined)
     : undefined;
+  const inheritedCompat = api === "anthropic-messages" && builtin?.api === api
+    ? {
+      ...(filteredCompat as Record<string, unknown> | undefined),
+      supportsToolReferences: (filteredCompat as Record<string, unknown> | undefined)?.supportsToolReferences
+        ?? defaultManagedProviderToolReferences(builtin),
+    } as ProviderModelConfig["compat"]
+    : filteredCompat;
+  const compat = resolveManagedProviderCompatProfile(api, inheritedCompat, provider.id, baseUrl);
   return {
     id,
     name: builtin?.name ?? id,
     api,
-    baseUrl: getProviderApiBaseUrl(provider.rootUrl, api),
+    baseUrl,
     reasoning: builtin?.reasoning ?? false,
     ...(builtin?.thinkingLevelMap ? { thinkingLevelMap: { ...builtin.thinkingLevelMap } } : {}),
     input: builtin?.input ? [...builtin.input] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: builtin?.contextWindow ?? UNKNOWN_PROVIDER_CONTEXT_WINDOW,
     maxTokens: builtin?.maxTokens ?? UNKNOWN_PROVIDER_MAX_TOKENS,
-    ...(compat ? { compat } : {}),
+    compat: compat as ProviderModelConfig["compat"],
   };
 }
 

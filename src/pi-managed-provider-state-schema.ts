@@ -29,12 +29,23 @@ function rejectUnknownManagedProviderStateKeys(
 
 function parseManagedProviderModelSource(value: unknown): ProviderModelSource {
   const source = requireManagedProviderStateObject(value, "Model source");
-  if (source.type === "discover" || source.type === "manual") {
+  if (source.type === "discover") {
+    rejectUnknownManagedProviderStateKeys(source, ["type", "modelIds", "ignoredModelIds"], "Model source");
+    if (!Array.isArray(source.modelIds) || !source.modelIds.every((entry) => typeof entry === "string")) {
+      throw new Error("Model source must contain string model identifiers");
+    }
+    const ignoredModelIds = source.ignoredModelIds ?? [];
+    if (!Array.isArray(ignoredModelIds) || !ignoredModelIds.every((entry) => typeof entry === "string")) {
+      throw new Error("Ignored models must contain string model identifiers");
+    }
+    return { type: "discover", modelIds: source.modelIds, ignoredModelIds };
+  }
+  if (source.type === "manual") {
     rejectUnknownManagedProviderStateKeys(source, ["type", "modelIds"], "Model source");
     if (!Array.isArray(source.modelIds) || !source.modelIds.every((entry) => typeof entry === "string")) {
       throw new Error("Model source must contain string model identifiers");
     }
-    return { type: source.type, modelIds: source.modelIds };
+    return { type: "manual", modelIds: source.modelIds };
   }
   throw new Error("Model source must be discover or manual");
 }

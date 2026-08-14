@@ -6,7 +6,7 @@ import { assertPiManagedProviderCaller } from "./pi-managed-provider-access.js";
 import {
   ALL_MANAGED_PROVIDER_COMPAT_KEYS,
   getManagedProviderAllowedCompatKeys,
-  type ManagedProviderBooleanCompatKey,
+  isManagedProviderCompatValueForKey,
   type ManagedProviderCompatOverrides,
   validateManagedProviderCompatOverrides,
 } from "./pi-managed-provider-model-options.js";
@@ -20,6 +20,13 @@ const DEFAULT_MODELS_CONFIG = "{\n  \"providers\": {}\n}\n";
 export interface ManagedProviderModelOverrideWrite {
   changed: boolean;
   rollback(): Promise<void>;
+}
+
+export interface ManagedProviderProtocolProfileEntry {
+  providerId: string;
+  modelId: string;
+  api: SupportedProviderApi;
+  defaults: ManagedProviderCompatOverrides;
 }
 
 interface ParsedModelsConfig {
@@ -95,7 +102,9 @@ export function readManagedProviderCompatOverridesFromText(
   for (const key of ALL_MANAGED_PROVIDER_COMPAT_KEYS) {
     const value = compat[key];
     if (value === undefined) continue;
-    if (typeof value !== "boolean") throw new Error(`Compatibility option ${key} must be boolean`);
+    if (!isManagedProviderCompatValueForKey(key, value)) {
+      throw new Error(`Compatibility option ${key} has an invalid value`);
+    }
     overrides[key] = value;
   }
   return overrides;
@@ -114,14 +123,37 @@ export function updateManagedProviderModelsJsonText(
   const allowed = new Set(getManagedProviderAllowedCompatKeys(api));
   let next = content;
   for (const key of ALL_MANAGED_PROVIDER_COMPAT_KEYS) {
+    const value = allowed.has(key) ? overrides[key] : undefined;
+    if (value === undefined) {
+      const { root } = parseModelsConfigText(next);
+      const compat = nestedObject(root, ["providers", providerId, "modelOverrides", modelId, "compat"]);
+      if (!compat || compat[key] === undefined) continue;
+    }
     next = modifyModelsConfigPath(
       next,
       ["providers", providerId, "modelOverrides", modelId, "compat", key],
-      allowed.has(key) ? overrides[key] : undefined,
+      value,
     );
   }
   next = pruneEmptyModelsConfigObjects(next, providerId, modelId);
   parseModelsConfigText(next);
+  return next;
+}
+
+export function materializeManagedProviderProtocolProfilesInText(
+  contentInput: string | undefined,
+  entries: readonly ManagedProviderProtocolProfileEntry[],
+): string {
+  let next = contentInput ?? DEFAULT_MODELS_CONFIG;
+  for (const entry of entries) {
+    const current = readManagedProviderCompatOverridesFromText(next, entry.providerId, entry.modelId);
+    const allowed = new Set(getManagedProviderAllowedCompatKeys(entry.api));
+    const merged = { ...entry.defaults };
+    for (const key of allowed) {
+      if (current[key] !== undefined) merged[key] = current[key];
+    }
+    next = updateManagedProviderModelsJsonText(next, entry.providerId, entry.modelId, entry.api, merged);
+  }
   return next;
 }
 
@@ -196,6 +228,51 @@ async function writeAtomicModelsConfig(path: string, content: string): Promise<v
   }
 }
 
+async function commitManagedProviderModelsConfigChange(
+  path: string,
+  transform: (content: string | undefined) => string,
+): Promise<ManagedProviderModelOverrideWrite> {
+  await mkdir(dirname(path), { recursive: true, mode: MODELS_CONFIG_DIRECTORY_MODE });
+  const release = await acquireModelsConfigLock(`${path}.pi-custom-provider.lock`);
+  let original: { existed: boolean; content?: string };
+  let next: string;
+  try {
+    original = await readOptionalFile(path);
+    next = transform(original.content);
+    const originalContent = original.content ?? DEFAULT_MODELS_CONFIG;
+    if (next === originalContent) return { changed: false, rollback: async () => {} };
+    await writeAtomicModelsConfig(`${path}.pi-custom-provider-backup`, originalContent);
+    await writeAtomicModelsConfig(path, next);
+  } catch (error) {
+    throw new Error(`Failed to update models.json: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await release();
+  }
+
+  return {
+    changed: true,
+    rollback: async () => {
+      const rollbackRelease = await acquireModelsConfigLock(`${path}.pi-custom-provider.lock`);
+      try {
+        const current = await readOptionalFile(path);
+        if ((current.content ?? DEFAULT_MODELS_CONFIG) !== next) {
+          throw new Error("Cannot roll back models.json because it changed after this operation");
+        }
+        if (original.existed) await writeAtomicModelsConfig(path, original.content!);
+        else {
+          try {
+            await unlink(path);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+      } finally {
+        await rollbackRelease();
+      }
+    },
+  };
+}
+
 class PiManagedProviderModelOverridesAccess {
   constructor(private readonly path: string) {}
 
@@ -210,62 +287,17 @@ class PiManagedProviderModelOverridesAccess {
     api: SupportedProviderApi,
     overrides: ManagedProviderCompatOverrides,
   ): Promise<ManagedProviderModelOverrideWrite> {
-    await mkdir(dirname(this.path), { recursive: true, mode: MODELS_CONFIG_DIRECTORY_MODE });
-    const release = await acquireModelsConfigLock(`${this.path}.pi-custom-provider.lock`);
-    let original: { existed: boolean; content?: string };
-    let next: string;
-    try {
-      original = await readOptionalFile(this.path);
-      next = updateManagedProviderModelsJsonText(original.content, providerId, modelId, api, overrides);
-      const originalContent = original.content ?? DEFAULT_MODELS_CONFIG;
-      if (next === originalContent) return { changed: false, rollback: async () => {} };
-      await writeAtomicModelsConfig(`${this.path}.pi-custom-provider-backup`, originalContent);
-      await writeAtomicModelsConfig(this.path, next);
-    } catch (error) {
-      throw new Error(`Failed to update models.json: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      await release();
-    }
-
-    return {
-      changed: true,
-      rollback: async () => {
-        const rollbackRelease = await acquireModelsConfigLock(`${this.path}.pi-custom-provider.lock`);
-        try {
-          const current = await readOptionalFile(this.path);
-          if ((current.content ?? DEFAULT_MODELS_CONFIG) !== next) {
-            throw new Error("Cannot roll back models.json because it changed after this operation");
-          }
-          if (original.existed) await writeAtomicModelsConfig(this.path, original.content!);
-          else {
-            try {
-              await unlink(this.path);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            }
-          }
-        } finally {
-          await rollbackRelease();
-        }
-      },
-    };
+    return commitManagedProviderModelsConfigChange(this.path, (content) =>
+      updateManagedProviderModelsJsonText(content, providerId, modelId, api, overrides)
+    );
   }
 
-  async findIncompatible(
-    providerId: string,
-    models: readonly { id: string; api: SupportedProviderApi }[],
-  ): Promise<Array<{ modelId: string; key: ManagedProviderBooleanCompatKey }>> {
-    const current = await readOptionalFile(this.path);
-    const content = current.content ?? DEFAULT_MODELS_CONFIG;
-    const incompatible: Array<{ modelId: string; key: ManagedProviderBooleanCompatKey }> = [];
-    for (const model of models) {
-      const overrides = readManagedProviderCompatOverridesFromText(content, providerId, model.id);
-      const allowed = new Set(getManagedProviderAllowedCompatKeys(model.api));
-      for (const key of Object.keys(overrides) as ManagedProviderBooleanCompatKey[]) {
-        if (!allowed.has(key)) incompatible.push({ modelId: model.id, key });
-      }
-    }
-    return incompatible;
+  async materialize(
+    entries: readonly ManagedProviderProtocolProfileEntry[],
+  ): Promise<ManagedProviderModelOverrideWrite> {
+    return commitManagedProviderModelsConfigChange(this.path, (content) =>
+      materializeManagedProviderProtocolProfilesInText(content, entries)
+    );
   }
 }
 

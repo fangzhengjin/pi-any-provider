@@ -120,7 +120,8 @@ export class PiManagedProviderStructuredMenuComponent {
       visibleWidth(this.options.columns[2]),
       ...mainItems.map((item) => visibleWidth(item.details![1])),
     ));
-    const primary = Math.min(36, width - 2 - secondary - tertiary - 4);
+    const columnGaps = tertiary > 0 ? 4 : 2;
+    const primary = Math.min(36, width - 2 - secondary - tertiary - columnGaps);
     return primary >= 16 ? { primary, secondary, tertiary } : undefined;
   }
 
@@ -138,10 +139,12 @@ export class PiManagedProviderStructuredMenuComponent {
     width: number,
   ): string {
     const columns = this.options.columns!;
+    const secondary = `  ${padManagedProviderCell(columns[1], layout.secondary)}`;
+    const tertiary = layout.tertiary > 0
+      ? `  ${padManagedProviderCell(columns[2], layout.tertiary)}`
+      : "";
     return this.theme.fg("dim", truncateToWidth(
-      `  ${padManagedProviderCell(columns[0], layout.primary)}  ` +
-      `${padManagedProviderCell(columns[1], layout.secondary)}  ` +
-      padManagedProviderCell(columns[2], layout.tertiary),
+      `  ${padManagedProviderCell(columns[0], layout.primary)}${secondary}${tertiary}`,
       width,
       "",
     ));
@@ -155,9 +158,11 @@ export class PiManagedProviderStructuredMenuComponent {
   ): string[] {
     const prefix = selected ? "› " : "  ";
     if (wideLayout && item.details) {
-      const line = `${prefix}${padManagedProviderCell(item.label, wideLayout.primary)}  ` +
-        `${padManagedProviderCell(item.details[0], wideLayout.secondary)}  ` +
-        padManagedProviderCell(item.details[1], wideLayout.tertiary);
+      const secondary = `  ${padManagedProviderCell(item.details[0], wideLayout.secondary)}`;
+      const tertiary = wideLayout.tertiary > 0
+        ? `  ${padManagedProviderCell(item.details[1], wideLayout.tertiary)}`
+        : "";
+      const line = `${prefix}${padManagedProviderCell(item.label, wideLayout.primary)}${secondary}${tertiary}`;
       return [selected
         ? this.theme.fg("accent", this.theme.bold(truncateToWidth(line, width, "…")))
         : truncateToWidth(line, width, "…")];
@@ -175,11 +180,13 @@ export class PiManagedProviderStructuredMenuComponent {
       width,
       "…",
     )));
-    lines.push(this.theme.fg("muted", truncateToWidth(
-      `    ${padManagedProviderCell(this.options.columns[2], labelWidth)}  ${item.details[1]}`,
-      width,
-      "…",
-    )));
+    if (this.options.columns[2] || item.details[1]) {
+      lines.push(this.theme.fg("muted", truncateToWidth(
+        `    ${padManagedProviderCell(this.options.columns[2], labelWidth)}  ${item.details[1]}`,
+        width,
+        "…",
+      )));
+    }
     return lines;
   }
 }

@@ -14,7 +14,8 @@ It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses i
 - Hidden API-key input stored through PI's native credential storage
 - Empty URL or key input keeps the current value
 - Automatic PI built-in capability reuse without cross-protocol compatibility leakage
-- Native per-model boolean compatibility overrides with inherit, enable, and disable states
+- Complete native compatibility profiles materialized for each final request protocol
+- Persistent removal and restoration of unusable discovered models
 - Automatic operating-system language detection plus English and Simplified Chinese
 
 Chat Completions is intentionally unsupported.
@@ -76,19 +77,23 @@ When editing an existing provider:
 
 The active provider can be edited or refreshed. PI automatically reselects the same model after registration changes. Switch providers only before deleting the active provider or removing the active model from its model list.
 
+**Manage model list** shows every model's final request protocol and source. Manual models can be removed directly. Discovered models are removed and added to an ignored list so future `/v1/models` refreshes do not restore image-generation, embedding, reranking, speech, or other unusable entries. Ignored models can be restored after the gateway confirms they are still published. The active model and the provider's final remaining model cannot be removed.
+
 ## Model metadata
 
 Exact model identifiers reuse PI's known protocol-neutral capabilities, including reasoning, supported inputs, context window, and maximum output. If PI already knows the model under the selected protocol, compatible protocol metadata is also retained.
 
 Unknown models use conservative defaults. Costs remain zero because a custom gateway route does not establish upstream pricing.
 
-Advanced model corrections appear as **Model protocol capabilities (advanced)**. The model picker shows aligned Model, Request protocol, and Settings columns on wide terminals, then switches to fixed-indentation detail rows on narrow terminals. Each capability explains what it controls and can use the PI default, be forced enabled, or be forced disabled. Restoring the PI default removes the explicit native override.
+Advanced settings appear as **Model protocol capabilities (advanced)**. The extension materializes PI's effective compatibility parameters for each final protocol into native model overrides instead of relying only on request-time fallbacks. Anthropic Messages includes adaptive thinking, temperature, strict tools, cache behavior, tool references, and related fields. OpenAI Responses includes developer messages, session-affinity format, strict and grammar tools, additional tools, cache behavior, and tool search.
+
+The model picker shows aligned Model, Request protocol, and Settings columns on wide terminals, then switches to fixed-indentation detail rows on narrow terminals. Each capability shows `Default (value)` when it matches the protocol and known-model profile; deviations show a forced or custom value. Switching protocol removes the previous protocol's fields and materializes the new profile. For new Anthropic-compatible models, adaptive thinking defaults to enabled unless same-protocol model metadata explicitly opts out.
 
 The extension edits `~/.pi/agent/models.json` with JSONC path-level changes, preserving comments, formatting, unrelated providers, and unknown legal settings. It keeps a 0600 rolling backup at `models.json.pi-custom-provider-backup`, refreshes only the affected provider, and reselects the active model. If refresh fails, the previous file and runtime are restored.
 
 ## Internal state
 
-The extension maintains provider definitions and the language preference in an internal state file under PI's extension settings directory. It is not a supported user configuration interface. API keys never enter that file; PI stores them in its native credential store. Model compatibility overrides remain in PI's native `models.json`.
+The extension maintains provider definitions, discovered-model snapshots, ignored model identifiers, and the language preference in an internal state file under PI's extension settings directory. It is not a supported user configuration interface. API keys never enter that file; PI stores them in its native credential store. Materialized protocol compatibility profiles and user exceptions remain in PI's native `models.json`.
 
 ## Development
 

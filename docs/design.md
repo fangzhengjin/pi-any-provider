@@ -46,15 +46,17 @@ Discovery accepts the standard `{ "data": [{ "id": "..." }] }` response only. Id
 
 For an exact identifier found in PI's built-in catalog, the extension copies protocol-neutral fields: display name, reasoning flag, thinking level map, input types, context window, and maximum output. Costs remain zero because a gateway route does not prove upstream pricing. When the built-in model already uses the selected protocol, the extension also retains only that protocol's allowed compatibility fields. It never copies provider, URL, headers, or sampling parameters; cross-protocol compatibility fields are discarded.
 
-Unknown identifiers use conservative defaults. Every model receives exactly one final protocol using three levels: an exact model setting first, the first matching ordered wildcard fallback second, and the provider default last.
+Unknown identifiers use conservative protocol-neutral metadata. Protocol compatibility is different: the extension mirrors every compatibility default actually resolved by PI's selected request implementation, then overlays same-protocol known-model values. New Anthropic-compatible models materialize adaptive thinking unless known same-protocol metadata explicitly opts out. Every model receives exactly one final protocol using three levels: an exact model setting first, the first matching ordered wildcard fallback second, and the provider default last.
 
 ## Native model overrides
 
-Advanced boolean compatibility options remain in PI's native `models.json` `modelOverrides` layer. The extension never stores a second copy in its provider state. The UI calls these settings model protocol capabilities: users see each model's final protocol and custom-setting count before selection, then choose PI default, force enabled, or force disabled for options allowed by that protocol.
+Protocol compatibility profiles remain in PI's native `models.json` `modelOverrides` layer. The extension never stores a second copy in provider state. Anthropic Messages materializes its nine boolean fields. OpenAI Responses materializes seven boolean fields plus the `sessionAffinityFormat` enum, including PI's automatically detected OpenAI/OpenRouter default.
 
-The structured selectors reuse PI's selection primitive for keyboard behavior and scrolling. Wide terminals render display-width-aware Model/Protocol/Settings and Capability/Policy/Effective columns; narrow terminals render the same fields on fixed-indentation detail rows. Long identifiers are truncated only inside their own field.
+The UI calls these settings model protocol capabilities. Users see each model's final protocol and custom-setting count before selection. The capability table has Capability and Current setting columns: values matching the resolved profile display as `Default (value)`; deviations display as forced or custom values. Selecting the default writes the concrete profile value rather than deleting it.
 
-The override store reads JSONC, changes only the selected property path, preserves comments and unrelated providers, serializes plugin writers with a lock, keeps a 0600 rolling backup, fsyncs a temporary file, and atomically replaces `models.json`. The command then calls PI's existing model-registry refresh for the affected provider and rebinds the active model. Refresh or rebind failure restores the previous file and refreshes the previous runtime state.
+The structured selectors reuse PI's selection primitive for keyboard behavior and scrolling. Wide terminals render display-width-aware columns; narrow terminals render the same fields on fixed-indentation detail rows. Long identifiers are truncated only inside their own field.
+
+The override store reads JSONC, changes only managed compatibility paths, preserves comments and unrelated providers, serializes plugin writers with a lock, keeps a 0600 rolling backup, fsyncs a temporary file, and atomically replaces `models.json`. Startup, provider save, discovery refresh, and protocol changes materialize all affected profiles in one file transaction. Model-level edits then call PI's existing model-registry refresh and rebind the active model. Failure restores the previous file and runtime state.
 
 ## TUI flow
 
@@ -64,7 +66,9 @@ Editing an existing provider collects URL, key, and default fallback protocol be
 
 The protocol-routing screen selects exact models from the provider's model list and accepts typed patterns only for wildcard fallbacks. Exact settings are not ordered; wildcard fallbacks can be moved and use first-match semantics.
 
-The provider action screen exposes edit connection, manage model source, configure model request protocols, manage advanced model protocol capabilities, refresh models, and delete. Updating the active provider or its native overrides reselects the same model after registration or refresh. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
+The provider action screen exposes edit connection, manage model list, configure model request protocols, manage advanced model protocol capabilities, refresh models, and delete. The model list shows final protocol and source. Removing a discovered model adds it to a persistent ignored list used by later refreshes; restoration performs discovery again. Exact protocol rules are cleaned, native capability settings are retained, and the active or final remaining model cannot be removed.
+
+Updating the active provider or its native overrides reselects the same model after registration or refresh. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
 
 Automatic language selection first checks the operating-system UI language list, then terminal message locales, JavaScript Intl, and finally English. macOS, Windows, and Linux/Unix use platform-specific sources. Explicit language selection is persisted and takes precedence immediately without reload.
 
@@ -74,10 +78,10 @@ Automatic language selection first checks the operating-system UI language list,
 - Failed discovery does not publish an empty or fabricated model list.
 - A failed edit leaves the previous registered provider and stored configuration active.
 - API keys are never included in thrown messages.
-- Native model override writes keep a backup and restore the previous file and runtime if refresh fails.
+- Native protocol-profile writes keep a backup and restore the previous file and runtime if profile materialization, registration, refresh, or rebind fails.
 - Known user-facing errors are translated at the command boundary; unknown PI, filesystem, and network causes retain their original diagnostic text.
 - Non-interactive modes report that `/providers` requires interactive mode rather than attempting prompts.
 
 ## Explicit exclusions
 
-No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, stale model cache policy, configuration migration framework, or custom stream implementation. The protocol-capability editor is intentionally limited to protocol-allowlisted boolean compatibility fields and writes PI's native override format rather than introducing a plugin-specific compatibility schema.
+No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, stale model cache policy, general configuration migration framework, or custom stream implementation. The protocol-capability editor is limited to the selected protocol's complete compatibility contract and writes PI's native override format rather than introducing a plugin-specific compatibility schema.

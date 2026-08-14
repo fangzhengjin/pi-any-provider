@@ -19,9 +19,12 @@ export const OPENAI_RESPONSES_MANAGED_PROVIDER_COMPAT_KEYS = [
   "supportsLongCacheRetention",
   "supportsStrictMode",
   "supportsOpenAIGrammarTools",
+  "supportsAdditionalTools",
   "supportsExplicitPromptCacheMode",
   "supportsToolSearch",
 ] as const;
+
+export const OPENAI_RESPONSES_MANAGED_PROVIDER_SESSION_AFFINITY_KEY = "sessionAffinityFormat" as const;
 
 const OPENAI_RESPONSES_MANAGED_PROVIDER_CATALOG_COMPAT_KEYS = [
   "supportsDeveloperRole",
@@ -29,6 +32,7 @@ const OPENAI_RESPONSES_MANAGED_PROVIDER_CATALOG_COMPAT_KEYS = [
   "supportsLongCacheRetention",
   "supportsStrictMode",
   "supportsOpenAIGrammarTools",
+  "supportsAdditionalTools",
   "supportsExplicitPromptCacheMode",
   "supportsToolSearch",
 ] as const;
@@ -36,50 +40,73 @@ const OPENAI_RESPONSES_MANAGED_PROVIDER_CATALOG_COMPAT_KEYS = [
 export type ManagedProviderBooleanCompatKey =
   | (typeof ANTHROPIC_MANAGED_PROVIDER_COMPAT_KEYS)[number]
   | (typeof OPENAI_RESPONSES_MANAGED_PROVIDER_COMPAT_KEYS)[number];
+export type ManagedProviderCompatKey =
+  | ManagedProviderBooleanCompatKey
+  | typeof OPENAI_RESPONSES_MANAGED_PROVIDER_SESSION_AFFINITY_KEY;
+export type ManagedProviderSessionAffinityFormat = "openai" | "openai-nosession" | "openrouter";
+export type ManagedProviderCompatValue = boolean | ManagedProviderSessionAffinityFormat;
+export type ManagedProviderCompatOverrides = Partial<Record<ManagedProviderCompatKey, ManagedProviderCompatValue>>;
 
-export type ManagedProviderCompatOverrides = Partial<Record<ManagedProviderBooleanCompatKey, boolean>>;
-
-export interface ManagedProviderBooleanOption {
-  key: ManagedProviderBooleanCompatKey;
+export interface ManagedProviderCompatOption {
+  key: ManagedProviderCompatKey;
   labelKey: ManagedProviderMessageKey;
   descriptionKey: ManagedProviderMessageKey;
-  defaultValue: boolean;
+  kind: "boolean" | "session-affinity";
+  defaultValue: ManagedProviderCompatValue;
 }
 
-const ANTHROPIC_OPTIONS: readonly ManagedProviderBooleanOption[] = [
-  { key: "forceAdaptiveThinking", labelKey: "adaptiveThinking", descriptionKey: "adaptiveThinkingDescription", defaultValue: false },
-  { key: "supportsTemperature", labelKey: "temperature", descriptionKey: "temperatureDescription", defaultValue: true },
-  { key: "supportsStrictTools", labelKey: "strictJsonTools", descriptionKey: "strictJsonToolsDescription", defaultValue: false },
-  { key: "supportsEagerToolInputStreaming", labelKey: "eagerToolStreaming", descriptionKey: "eagerToolStreamingDescription", defaultValue: true },
-  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", descriptionKey: "longCacheRetentionDescription", defaultValue: true },
-  { key: "supportsCacheControlOnTools", labelKey: "toolCacheControl", descriptionKey: "toolCacheControlDescription", defaultValue: true },
-  { key: "sendSessionAffinityHeaders", labelKey: "sessionAffinityHeaders", descriptionKey: "sessionAffinityHeadersDescription", defaultValue: false },
-  { key: "allowEmptySignature", labelKey: "emptyThinkingSignature", descriptionKey: "emptyThinkingSignatureDescription", defaultValue: false },
-  { key: "supportsToolReferences", labelKey: "toolReferences", descriptionKey: "toolReferencesDescription", defaultValue: false },
+function booleanManagedProviderOption(
+  key: ManagedProviderBooleanCompatKey,
+  labelKey: ManagedProviderMessageKey,
+  descriptionKey: ManagedProviderMessageKey,
+  defaultValue: boolean,
+): ManagedProviderCompatOption {
+  return { key, labelKey, descriptionKey, kind: "boolean", defaultValue };
+}
+
+const ANTHROPIC_OPTIONS: readonly ManagedProviderCompatOption[] = [
+  booleanManagedProviderOption("forceAdaptiveThinking", "adaptiveThinking", "adaptiveThinkingDescription", true),
+  booleanManagedProviderOption("supportsTemperature", "temperature", "temperatureDescription", true),
+  booleanManagedProviderOption("supportsStrictTools", "strictJsonTools", "strictJsonToolsDescription", false),
+  booleanManagedProviderOption("supportsEagerToolInputStreaming", "eagerToolStreaming", "eagerToolStreamingDescription", true),
+  booleanManagedProviderOption("supportsLongCacheRetention", "longCacheRetention", "longCacheRetentionDescription", true),
+  booleanManagedProviderOption("supportsCacheControlOnTools", "toolCacheControl", "toolCacheControlDescription", true),
+  booleanManagedProviderOption("sendSessionAffinityHeaders", "sessionAffinityHeaders", "sessionAffinityHeadersDescription", false),
+  booleanManagedProviderOption("allowEmptySignature", "emptyThinkingSignature", "emptyThinkingSignatureDescription", false),
+  booleanManagedProviderOption("supportsToolReferences", "toolReferences", "toolReferencesDescription", false),
 ];
 
-const OPENAI_RESPONSES_OPTIONS: readonly ManagedProviderBooleanOption[] = [
-  { key: "supportsDeveloperRole", labelKey: "developerRole", descriptionKey: "developerRoleDescription", defaultValue: true },
-  { key: "supportsStrictMode", labelKey: "strictJsonTools", descriptionKey: "strictJsonToolsDescription", defaultValue: false },
-  { key: "supportsOpenAIGrammarTools", labelKey: "openAiGrammarTools", descriptionKey: "openAiGrammarToolsDescription", defaultValue: false },
-  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", descriptionKey: "longCacheRetentionDescription", defaultValue: true },
-  { key: "supportsExplicitPromptCacheMode", labelKey: "explicitPromptCacheMode", descriptionKey: "explicitPromptCacheModeDescription", defaultValue: false },
-  { key: "supportsToolSearch", labelKey: "toolSearch", descriptionKey: "toolSearchDescription", defaultValue: false },
+const OPENAI_RESPONSES_OPTIONS: readonly ManagedProviderCompatOption[] = [
+  booleanManagedProviderOption("supportsDeveloperRole", "developerRole", "developerRoleDescription", true),
+  {
+    key: "sessionAffinityFormat",
+    labelKey: "sessionAffinityFormat",
+    descriptionKey: "sessionAffinityFormatDescription",
+    kind: "session-affinity",
+    defaultValue: "openai",
+  },
+  booleanManagedProviderOption("supportsStrictMode", "strictJsonTools", "strictJsonToolsDescription", false),
+  booleanManagedProviderOption("supportsOpenAIGrammarTools", "openAiGrammarTools", "openAiGrammarToolsDescription", false),
+  booleanManagedProviderOption("supportsAdditionalTools", "additionalTools", "additionalToolsDescription", false),
+  booleanManagedProviderOption("supportsLongCacheRetention", "longCacheRetention", "longCacheRetentionDescription", true),
+  booleanManagedProviderOption("supportsExplicitPromptCacheMode", "explicitPromptCacheMode", "explicitPromptCacheModeDescription", false),
+  booleanManagedProviderOption("supportsToolSearch", "toolSearch", "toolSearchDescription", false),
 ];
 
 export const ALL_MANAGED_PROVIDER_COMPAT_KEYS = [...new Set([
   ...ANTHROPIC_MANAGED_PROVIDER_COMPAT_KEYS,
   ...OPENAI_RESPONSES_MANAGED_PROVIDER_COMPAT_KEYS,
-])] as readonly ManagedProviderBooleanCompatKey[];
+  OPENAI_RESPONSES_MANAGED_PROVIDER_SESSION_AFFINITY_KEY,
+])] as readonly ManagedProviderCompatKey[];
 
-export function getManagedProviderBooleanOptions(api: SupportedProviderApi): readonly ManagedProviderBooleanOption[] {
+export function getManagedProviderCompatOptions(api: SupportedProviderApi): readonly ManagedProviderCompatOption[] {
   return api === "anthropic-messages" ? ANTHROPIC_OPTIONS : OPENAI_RESPONSES_OPTIONS;
 }
 
-export function getManagedProviderAllowedCompatKeys(api: SupportedProviderApi): readonly ManagedProviderBooleanCompatKey[] {
+export function getManagedProviderAllowedCompatKeys(api: SupportedProviderApi): readonly ManagedProviderCompatKey[] {
   return api === "anthropic-messages"
     ? ANTHROPIC_MANAGED_PROVIDER_COMPAT_KEYS
-    : OPENAI_RESPONSES_MANAGED_PROVIDER_COMPAT_KEYS;
+    : [...OPENAI_RESPONSES_MANAGED_PROVIDER_COMPAT_KEYS, OPENAI_RESPONSES_MANAGED_PROVIDER_SESSION_AFFINITY_KEY];
 }
 
 export function filterManagedProviderCompatForApi(
@@ -94,12 +121,45 @@ export function filterManagedProviderCompatForApi(
   return Object.keys(filtered).length > 0 ? filtered as ProviderModelConfig["compat"] : undefined;
 }
 
-export function getManagedProviderInheritedBooleanValue(
-  option: ManagedProviderBooleanOption,
+function isManagedProviderSessionAffinityFormat(value: unknown): value is ManagedProviderSessionAffinityFormat {
+  return value === "openai" || value === "openai-nosession" || value === "openrouter";
+}
+
+function isManagedProviderCompatOptionValue(option: ManagedProviderCompatOption, value: unknown): value is ManagedProviderCompatValue {
+  return option.kind === "boolean" ? typeof value === "boolean" : isManagedProviderSessionAffinityFormat(value);
+}
+
+export function isManagedProviderCompatValueForKey(
+  key: ManagedProviderCompatKey,
+  value: unknown,
+): value is ManagedProviderCompatValue {
+  return key === "sessionAffinityFormat" ? isManagedProviderSessionAffinityFormat(value) : typeof value === "boolean";
+}
+
+export function getManagedProviderProtocolDefaultValue(
+  option: ManagedProviderCompatOption,
   compat: ProviderModelConfig["compat"] | undefined,
-): boolean {
-  const value = (compat as Record<string, unknown> | undefined)?.[option.key];
-  return typeof value === "boolean" ? value : option.defaultValue;
+  providerId: string,
+  baseUrl: string,
+): ManagedProviderCompatValue {
+  const inherited = (compat as Record<string, unknown> | undefined)?.[option.key];
+  if (isManagedProviderCompatOptionValue(option, inherited)) return inherited;
+  if (option.key === "sessionAffinityFormat") {
+    return providerId === "openrouter" || baseUrl.includes("openrouter.ai") ? "openrouter" : "openai";
+  }
+  return option.defaultValue;
+}
+
+export function resolveManagedProviderCompatProfile(
+  api: SupportedProviderApi,
+  compat: ProviderModelConfig["compat"] | undefined,
+  providerId: string,
+  baseUrl: string,
+): ManagedProviderCompatOverrides {
+  return Object.fromEntries(getManagedProviderCompatOptions(api).map((option) => [
+    option.key,
+    getManagedProviderProtocolDefaultValue(option, compat, providerId, baseUrl),
+  ])) as ManagedProviderCompatOverrides;
 }
 
 export function validateManagedProviderCompatOverrides(
@@ -107,16 +167,21 @@ export function validateManagedProviderCompatOverrides(
   value: Record<string, unknown>,
 ): ManagedProviderCompatOverrides {
   const allowed = new Set(getManagedProviderAllowedCompatKeys(api));
+  const options = new Map(getManagedProviderCompatOptions(api).map((option) => [option.key, option]));
   const overrides: ManagedProviderCompatOverrides = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (!ALL_MANAGED_PROVIDER_COMPAT_KEYS.includes(key as ManagedProviderBooleanCompatKey)) {
+    if (!ALL_MANAGED_PROVIDER_COMPAT_KEYS.includes(key as ManagedProviderCompatKey)) {
       throw new Error(`Unsupported compatibility option ${key}`);
     }
-    if (!allowed.has(key as ManagedProviderBooleanCompatKey)) {
+    if (!allowed.has(key as ManagedProviderCompatKey)) {
       throw new Error(`Compatibility option ${key} does not apply to ${api}`);
     }
-    if (typeof entry !== "boolean") throw new Error(`Compatibility option ${key} must be boolean`);
-    overrides[key as ManagedProviderBooleanCompatKey] = entry;
+    const option = options.get(key as ManagedProviderCompatKey)!;
+    if (!isManagedProviderCompatOptionValue(option, entry)) {
+      const expected = option.kind === "boolean" ? "boolean" : "a supported session-affinity format";
+      throw new Error(`Compatibility option ${key} must be ${expected}`);
+    }
+    overrides[key as ManagedProviderCompatKey] = entry;
   }
   return overrides;
 }

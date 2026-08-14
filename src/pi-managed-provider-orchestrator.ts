@@ -6,13 +6,22 @@ import {
   type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition, ManagedProviderState } from "./pi-managed-provider-contracts.js";
-import { discoverManagedProviderModelIds } from "./pi-managed-provider-catalog.js";
+import {
+  buildManagedProviderModel,
+  discoverManagedProviderModelIds,
+} from "./pi-managed-provider-catalog.js";
 import {
   ManagedProviderLocalizedError,
   type ManagedProviderLanguagePreference,
 } from "./pi-managed-provider-localization.js";
-import type { ManagedProviderCompatOverrides } from "./pi-managed-provider-model-options.js";
-import { bindPiManagedProviderModelOverrides } from "./pi-managed-provider-model-overrides.js";
+import {
+  type ManagedProviderCompatOverrides,
+  validateManagedProviderCompatOverrides,
+} from "./pi-managed-provider-model-options.js";
+import {
+  bindPiManagedProviderModelOverrides,
+  type ManagedProviderProtocolProfileEntry,
+} from "./pi-managed-provider-model-overrides.js";
 import { resolveProviderModelApi } from "./pi-managed-provider-routing.js";
 import { bindPiManagedProviderCredentials } from "./pi-managed-provider-credentials.js";
 import { bindPiManagedProviderRegistration } from "./pi-managed-provider-registration.js";
@@ -33,10 +42,56 @@ const piManagedProviderModelOverrides = await bindPiManagedProviderModelOverride
   PI_MANAGED_PROVIDER_MODELS_PATH,
 );
 
+function createManagedProviderProtocolProfileEntries(
+  providers: readonly ManagedProviderDefinition[],
+): ManagedProviderProtocolProfileEntry[] {
+  return providers.flatMap((provider) => provider.modelSource.modelIds.map((modelId) => {
+    const api = resolveProviderModelApi(modelId, provider.defaultApi, provider.protocolRules);
+    const model = buildManagedProviderModel(provider, modelId);
+    return {
+      providerId: provider.id,
+      modelId,
+      api,
+      defaults: validateManagedProviderCompatOverrides(
+        api,
+        (model.compat ?? {}) as Record<string, unknown>,
+      ),
+    };
+  }));
+}
+
 class PiManagedProviderOrchestrator {
   async load(pi: ExtensionAPI): Promise<void> {
     await piManagedProviderState.initialize();
-    for (const provider of piManagedProviderState.snapshot().providers) piManagedProviderRegistration.register(pi, provider);
+    const providers = piManagedProviderState.snapshot().providers;
+    const profileWrite = await piManagedProviderModelOverrides.materialize(
+      createManagedProviderProtocolProfileEntries(providers),
+    );
+    const registered: string[] = [];
+    try {
+      for (const provider of providers) {
+        piManagedProviderRegistration.register(pi, provider);
+        registered.push(provider.id);
+      }
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      for (const providerId of registered.reverse()) {
+        try {
+          piManagedProviderRegistration.unregister(pi, providerId);
+        } catch (rollbackError) {
+          rollbackErrors.push(`provider rollback failed for ${providerId}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      try {
+        await profileWrite.rollback();
+      } catch (rollbackError) {
+        rollbackErrors.push(`model profile rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+      if (rollbackErrors.length > 0) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; ${rollbackErrors.join("; ")}`, { cause: error });
+      }
+      throw error;
+    }
   }
 
   snapshot(): ManagedProviderState {
@@ -73,28 +128,14 @@ class PiManagedProviderOrchestrator {
       : [...currentState.providers, provider];
     const nextState: ManagedProviderState = { ...currentState, providers: nextProviders };
 
-    if (current) {
-      const changedModels = provider.modelSource.modelIds.flatMap((modelId) => {
-        const previousApi = current.modelSource.modelIds.includes(modelId)
-          ? resolveProviderModelApi(modelId, current.defaultApi, current.protocolRules)
-          : undefined;
-        const nextApi = resolveProviderModelApi(modelId, provider.defaultApi, provider.protocolRules);
-        return previousApi && previousApi !== nextApi ? [{ id: modelId, api: nextApi }] : [];
-      });
-      const incompatible = await piManagedProviderModelOverrides.findIncompatible(provider.id, changedModels);
-      if (incompatible.length > 0) {
-        const first = incompatible[0]!;
-        throw new ManagedProviderLocalizedError("resetIncompatibleOverride", {
-          option: first.key,
-          model: first.modelId,
-        });
-      }
-    }
-
     const rollbackCredential = options.apiKey
       ? await piManagedProviderCredentials.persistApiKey(provider, options.apiKey)
       : undefined;
+    let profileWrite: Awaited<ReturnType<typeof piManagedProviderModelOverrides.materialize>> | undefined;
     try {
+      profileWrite = await piManagedProviderModelOverrides.materialize(
+        createManagedProviderProtocolProfileEntries([provider]),
+      );
       piManagedProviderRegistration.replace(pi, current, provider);
       try {
         await piManagedProviderState.replace(nextState);
@@ -104,7 +145,20 @@ class PiManagedProviderOrchestrator {
         throw error;
       }
     } catch (error) {
-      await rollbackCredential?.();
+      const rollbackErrors: string[] = [];
+      try {
+        await profileWrite?.rollback();
+      } catch (rollbackError) {
+        rollbackErrors.push(`model profile rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+      try {
+        await rollbackCredential?.();
+      } catch (rollbackError) {
+        rollbackErrors.push(`credential rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+      if (rollbackErrors.length > 0) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; ${rollbackErrors.join("; ")}`, { cause: error });
+      }
       throw error;
     }
   }
@@ -197,7 +251,14 @@ class PiManagedProviderOrchestrator {
     if (!apiKey) throw new ManagedProviderLocalizedError("setApiKeyBeforeDiscovery");
     const timeoutSignal = AbortSignal.timeout(PI_MANAGED_PROVIDER_DISCOVERY_TIMEOUT_MS);
     const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
-    return discoverManagedProviderModelIds(provider.rootUrl, apiKey, signal);
+    const discovered = await discoverManagedProviderModelIds(provider.rootUrl, apiKey, signal);
+    if (provider.modelSource.type !== "discover" || provider.modelSource.ignoredModelIds.length === 0) {
+      return discovered;
+    }
+    const ignoredModelIds = new Set(provider.modelSource.ignoredModelIds);
+    const visible = discovered.filter((modelId) => !ignoredModelIds.has(modelId));
+    if (visible.length === 0) throw new ManagedProviderLocalizedError("allDiscoveredModelsIgnored");
+    return visible;
   }
 }
 

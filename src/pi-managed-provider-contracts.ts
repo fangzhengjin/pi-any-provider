@@ -10,7 +10,7 @@ export interface ProviderProtocolRule {
 }
 
 export type ProviderModelSource =
-  | { type: "discover"; modelIds: string[] }
+  | { type: "discover"; modelIds: string[]; ignoredModelIds: string[] }
   | { type: "manual"; modelIds: string[] };
 
 export interface ManagedProviderDefinition {
@@ -136,7 +136,21 @@ export function validateManagedProviderDefinition(value: ManagedProviderDefiniti
   if (new Set(patterns).size !== patterns.length) throw new Error("Protocol rule patterns must be unique");
 
   const modelIds = parseManualProviderModelIds(value.modelSource.modelIds.join("\n"));
-  const modelSource = { type: value.modelSource.type, modelIds } as ProviderModelSource;
+  const modelSource: ProviderModelSource = value.modelSource.type === "discover"
+    ? {
+      type: "discover",
+      modelIds,
+      ignoredModelIds: value.modelSource.ignoredModelIds.map(validateProviderModelIdentifier),
+    }
+    : { type: "manual", modelIds };
+  if (modelSource.type === "discover") {
+    if (new Set(modelSource.ignoredModelIds).size !== modelSource.ignoredModelIds.length) {
+      throw new Error("Ignored model identifiers must be unique");
+    }
+    if (modelSource.ignoredModelIds.some((modelId) => modelIds.includes(modelId))) {
+      throw new Error("Ignored models cannot remain in the active model list");
+    }
+  }
 
   return {
     id,
