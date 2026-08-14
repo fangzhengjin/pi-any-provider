@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parse } from "jsonc-parser";
 import {
   buildManagedProviderModel,
   discoverManagedProviderModelIds,
@@ -11,6 +12,15 @@ import {
   validateProviderProtocolWildcardPattern,
 } from "../src/pi-managed-provider-contracts.js";
 import { applyPiManagedProviderConnectionInput } from "../src/pi-managed-provider-edit.js";
+import {
+  createManagedProviderTranslator,
+  matchManagedProviderLanguage,
+  resolveManagedProviderLanguageCandidates,
+} from "../src/pi-managed-provider-localization.js";
+import {
+  readManagedProviderCompatOverridesFromText,
+  updateManagedProviderModelsJsonText,
+} from "../src/pi-managed-provider-model-overrides.js";
 import {
   formatProviderRootUrlForDisplay,
   getProviderApiBaseUrl,
@@ -31,6 +41,26 @@ const provider: ManagedProviderDefinition = {
   defaultApi: "anthropic-messages",
   protocolRules: [{ pattern: "gpt-*", api: "openai-responses" }],
 };
+
+describe("localization", () => {
+  test("prefers the operating-system UI language over an English terminal locale", () => {
+    const detection = resolveManagedProviderLanguageCandidates([
+      { locale: "zh-Hans-CN", source: "macos" },
+      { locale: "en_US.UTF-8", source: "environment" },
+    ]);
+    expect(detection).toMatchObject({ language: "zh-CN", source: "macos" });
+    expect(matchManagedProviderLanguage("zh_TW.UTF-8")).toBeUndefined();
+  });
+
+  test("renders language names in the current interface language", () => {
+    const chinese = createManagedProviderTranslator("zh-CN");
+    const english = createManagedProviderTranslator("en");
+    expect(chinese.t("languageChinese")).toBe("中文（简体）");
+    expect(chinese.t("languageEnglish")).toBe("英文");
+    expect(english.t("languageChinese")).toBe("Chinese (Simplified)");
+    expect(english.t("languageEnglish")).toBe("English");
+  });
+});
 
 describe("provider identifiers", () => {
   test("preserves a display name that is already a valid PI identifier", () => {
@@ -204,6 +234,97 @@ describe("model catalog", () => {
   });
 });
 
+describe("native model overrides", () => {
+  test("preserves JSONC comments and unrelated providers while editing one model", () => {
+    const original = `{
+  // Keep this comment
+  "providers": {
+    "Other": { "modelOverrides": { "other": { "contextWindow": 42 } } },
+    "TokenHub": {
+      "modelOverrides": {
+        "deepseek-v4-flash": {
+          "compat": { "forceAdaptiveThinking": true }
+        }
+      }
+    }
+  }
+}\n`;
+    const updated = updateManagedProviderModelsJsonText(
+      original,
+      "TokenHub",
+      "deepseek-v4-flash",
+      "anthropic-messages",
+      { forceAdaptiveThinking: true, supportsStrictTools: true },
+    );
+    expect(updated).toContain("// Keep this comment");
+    const parsed = parse(updated) as {
+      providers: Record<string, { modelOverrides: Record<string, { contextWindow?: number; compat?: Record<string, boolean> }> }>;
+    };
+    expect(parsed.providers.Other?.modelOverrides.other?.contextWindow).toBe(42);
+    expect(parsed.providers.TokenHub?.modelOverrides["deepseek-v4-flash"]?.compat).toEqual({
+      forceAdaptiveThinking: true,
+      supportsStrictTools: true,
+    });
+  });
+
+  test("uses inherit to remove managed fields and prunes empty override nodes", () => {
+    const original = `{
+  "providers": {
+    "TokenHub": {
+      "modelOverrides": {
+        "deepseek-v4-flash": {
+          "compat": { "forceAdaptiveThinking": true }
+        }
+      }
+    }
+  }
+}\n`;
+    const updated = updateManagedProviderModelsJsonText(
+      original,
+      "TokenHub",
+      "deepseek-v4-flash",
+      "anthropic-messages",
+      {},
+    );
+    expect(parse(updated)).toEqual({ providers: {} });
+    expect(readManagedProviderCompatOverridesFromText(updated, "TokenHub", "deepseek-v4-flash")).toEqual({});
+  });
+
+  test("removes stale compatibility fields from another protocol when saving", () => {
+    const original = `{
+  "providers": {
+    "TokenHub": {
+      "modelOverrides": {
+        "deepseek-v4-flash": {
+          "compat": { "supportsDeveloperRole": false, "forceAdaptiveThinking": true }
+        }
+      }
+    }
+  }
+}\n`;
+    const updated = updateManagedProviderModelsJsonText(
+      original,
+      "TokenHub",
+      "deepseek-v4-flash",
+      "anthropic-messages",
+      { forceAdaptiveThinking: true },
+    );
+    expect(readManagedProviderCompatOverridesFromText(updated, "TokenHub", "deepseek-v4-flash")).toEqual({
+      forceAdaptiveThinking: true,
+    });
+  });
+
+  test("rejects compatibility fields from the wrong final protocol", () => {
+    expect(() => updateManagedProviderModelsJsonText(
+      undefined,
+      "TokenHub",
+      "gpt-5.6-sol",
+      "openai-responses",
+      { forceAdaptiveThinking: true },
+    )).toThrow("does not apply");
+  });
+});
+
 describe("provider management home", () => {
   test("renders add first and configured providers below a labeled divider", () => {
     const passthroughTheme = {
@@ -211,6 +332,8 @@ describe("provider management home", () => {
       bold(text: string) { return text; },
     };
     const component = new PiManagedProviderHomeComponent(
+      createManagedProviderTranslator("en"),
+      "English",
       [provider],
       new Set([provider.id]),
       { matches() { return false; } } as never,
@@ -219,14 +342,37 @@ describe("provider management home", () => {
       () => {},
     );
     const lines = component.render(100);
-    expect(lines.indexOf("› Add provider")).toBeLessThan(lines.findIndex((line) => line.startsWith("Configured providers (1)")));
+    expect(lines.indexOf("› Add provider")).toBeLessThan(lines.indexOf("  Language · English"));
+    expect(lines.indexOf("  Language · English")).toBeLessThan(lines.findIndex((line) => line.startsWith("Configured providers (1)")));
     expect(lines.findIndex((line) => line.startsWith("Configured providers (1)"))).toBeLessThan(lines.indexOf("  Test Provider"));
+  });
+
+  test("renders the language row without mixed-language names", () => {
+    const passthroughTheme = {
+      fg(_color: string, text: string) { return text; },
+      bold(text: string) { return text; },
+    };
+    const component = new PiManagedProviderHomeComponent(
+      createManagedProviderTranslator("zh-CN"),
+      "中文（简体）",
+      [],
+      new Set(),
+      { matches() { return false; } } as never,
+      passthroughTheme as never,
+      () => {},
+      () => {},
+    );
+    const text = component.render(80).join("\n");
+    expect(text).toContain("语言 · 中文（简体）");
+    expect(text).toContain("添加供应商");
+    expect(text).not.toContain("English");
   });
 });
 
 describe("stored state", () => {
   test("strictly accepts the current internal format and rejects secrets", () => {
     const state = parseManagedProviderState({ version: 1, providers: [provider] });
+    expect(state.language).toBe("auto");
     expect(state.providers[0]?.id).toBe(provider.id);
     expect(() => parseManagedProviderState({
       version: 1,

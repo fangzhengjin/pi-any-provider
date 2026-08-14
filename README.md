@@ -2,7 +2,7 @@
 
 A minimal PI extension for managing custom model gateways from the terminal UI.
 
-It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses implementations. The extension does not implement its own streaming protocol, pricing service, model-brand detection, or compatibility override system.
+It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses implementations. The extension does not implement its own streaming protocol, pricing service, model-brand detection, or competing compatibility format. Advanced options edit PI's native model overrides.
 
 ## Features
 
@@ -14,6 +14,8 @@ It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses i
 - Hidden API-key input stored through PI's native credential storage
 - Empty URL or key input keeps the current value
 - Automatic PI built-in capability reuse without cross-protocol compatibility leakage
+- Native per-model boolean compatibility overrides with inherit, enable, and disable states
+- Automatic operating-system language detection plus English and Simplified Chinese
 
 Chat Completions is intentionally unsupported.
 
@@ -39,7 +41,9 @@ Run:
 /providers
 ```
 
-The first item adds a provider. Configured providers appear below it.
+The first item adds a provider. The second changes the interface language. Configured providers appear below them.
+
+Language defaults to automatic detection. The extension checks the operating-system UI language, terminal message locale, and JavaScript Intl in that order, with English as the final fallback. You can explicitly select English or Simplified Chinese. Language names follow the current interface language, and changes apply immediately.
 
 Enter a provider name first. The extension creates the internal PI identifier automatically, including a numeric suffix when another provider already uses the same name-derived identifier.
 
@@ -78,11 +82,13 @@ Exact model identifiers reuse PI's known protocol-neutral capabilities, includin
 
 Unknown models use conservative defaults. Costs remain zero because a custom gateway route does not establish upstream pricing.
 
-Advanced model corrections continue to use PI's native model overrides. The extension does not create a competing override format.
+Advanced model corrections continue to use PI's native model overrides. Select **Manage model overrides**, choose a model, then set each protocol-appropriate boolean option to **Inherit**, **Enabled**, or **Disabled**. Inherit removes the explicit field and shows the effective inherited value.
+
+The extension edits `~/.pi/agent/models.json` with JSONC path-level changes, preserving comments, formatting, unrelated providers, and unknown legal settings. It keeps a 0600 rolling backup at `models.json.pi-custom-provider-backup`, refreshes only the affected provider, and reselects the active model. If refresh fails, the previous file and runtime are restored.
 
 ## Internal state
 
-The extension maintains an internal provider state file under PI's extension settings directory. It is not a supported user configuration interface. API keys never enter that file; PI stores them in its native credential store.
+The extension maintains provider definitions and the language preference in an internal state file under PI's extension settings directory. It is not a supported user configuration interface. API keys never enter that file; PI stores them in its native credential store. Model compatibility overrides remain in PI's native `models.json`.
 
 ## Development
 

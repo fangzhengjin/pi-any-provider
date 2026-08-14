@@ -1,19 +1,21 @@
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-type PiManagedProviderProtectedModule = "state" | "credentials" | "registration";
+type PiManagedProviderProtectedModule = "state" | "credentials" | "registration" | "model-overrides";
 
 const piManagedProviderBusinessPaths = {
   orchestrator: fileURLToPath(new URL("./pi-managed-provider-orchestrator.ts", import.meta.url)),
   state: fileURLToPath(new URL("./pi-managed-provider-state.ts", import.meta.url)),
   credentials: fileURLToPath(new URL("./pi-managed-provider-credentials.ts", import.meta.url)),
   registration: fileURLToPath(new URL("./pi-managed-provider-registration.ts", import.meta.url)),
+  modelOverrides: fileURLToPath(new URL("./pi-managed-provider-model-overrides.ts", import.meta.url)),
 } as const;
 
 const piManagedProviderCallerWhitelist: Record<PiManagedProviderProtectedModule, readonly string[]> = {
   state: [piManagedProviderBusinessPaths.orchestrator],
   credentials: [piManagedProviderBusinessPaths.orchestrator],
   registration: [piManagedProviderBusinessPaths.orchestrator],
+  "model-overrides": [piManagedProviderBusinessPaths.orchestrator],
 };
 
 let piManagedProviderWhitelistValidation: Promise<void> | undefined;

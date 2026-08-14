@@ -18,6 +18,7 @@ async function createIsolatedPiAgent(): Promise<string> {
     join(agentDir, "extension-settings", "pi-custom-provider.json"),
     `${JSON.stringify({
       version: 1,
+      language: "en",
       providers: [
         {
           id: "integration-provider",
@@ -46,6 +47,11 @@ describe("extension integration", () => {
     temporaryDirectories.push(root);
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "extension-settings"), { recursive: true });
+    await writeFile(
+      join(agentDir, "extension-settings", "pi-custom-provider.json"),
+      `${JSON.stringify({ version: 1, language: "en", providers: [] }, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
     const script = `
       import { readFile, stat } from "node:fs/promises";
       import { getKeybindings } from "@earendil-works/pi-tui";

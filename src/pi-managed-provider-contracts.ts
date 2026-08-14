@@ -1,3 +1,5 @@
+import type { ManagedProviderLanguagePreference } from "./pi-managed-provider-localization.js";
+
 export const SUPPORTED_PROVIDER_APIS = ["anthropic-messages", "openai-responses"] as const;
 
 export type SupportedProviderApi = (typeof SUPPORTED_PROVIDER_APIS)[number];
@@ -22,11 +24,13 @@ export interface ManagedProviderDefinition {
 
 export interface ManagedProviderState {
   version: 1;
+  language: ManagedProviderLanguagePreference;
   providers: ManagedProviderDefinition[];
 }
 
 export const EMPTY_MANAGED_PROVIDER_STATE: ManagedProviderState = {
   version: 1,
+  language: "auto",
   providers: [],
 };
 

@@ -2,6 +2,7 @@ import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/pro
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition, SupportedProviderApi } from "./pi-managed-provider-contracts.js";
 import { validateProviderModelIdentifier } from "./pi-managed-provider-contracts.js";
+import { filterManagedProviderCompatForApi } from "./pi-managed-provider-model-options.js";
 import {
   getProviderApiBaseUrl,
   getProviderDiscoveryUrl,
@@ -24,36 +25,6 @@ function findBuiltinModel(modelId: string, api: SupportedProviderApi) {
   return matches?.find((model) => model.api === api) ?? matches?.[0];
 }
 
-function filterManagedProviderCompat(
-  api: SupportedProviderApi,
-  compat: Record<string, unknown> | undefined,
-): ProviderModelConfig["compat"] | undefined {
-  if (!compat) return undefined;
-  const allowed = api === "anthropic-messages"
-    ? [
-        "supportsEagerToolInputStreaming",
-        "supportsLongCacheRetention",
-        "sendSessionAffinityHeaders",
-        "supportsCacheControlOnTools",
-        "supportsTemperature",
-        "forceAdaptiveThinking",
-        "allowEmptySignature",
-        "supportsStrictTools",
-        "supportsToolReferences",
-      ]
-    : [
-        "supportsDeveloperRole",
-        "sessionAffinityFormat",
-        "supportsLongCacheRetention",
-        "supportsStrictMode",
-        "supportsOpenAIGrammarTools",
-        "supportsExplicitPromptCacheMode",
-        "supportsToolSearch",
-      ];
-  const filtered = Object.fromEntries(allowed.flatMap((key) => compat[key] === undefined ? [] : [[key, compat[key]]]));
-  return Object.keys(filtered).length > 0 ? filtered as ProviderModelConfig["compat"] : undefined;
-}
-
 export function buildManagedProviderModel(
   provider: ManagedProviderDefinition,
   modelIdInput: string,
@@ -62,7 +33,7 @@ export function buildManagedProviderModel(
   const api = resolveProviderModelApi(id, provider.defaultApi, provider.protocolRules);
   const builtin = findBuiltinModel(id, api);
   const compat = builtin?.api === api
-    ? filterManagedProviderCompat(api, builtin.compat as Record<string, unknown> | undefined)
+    ? filterManagedProviderCompatForApi(api, builtin.compat as Record<string, unknown> | undefined)
     : undefined;
   return {
     id,

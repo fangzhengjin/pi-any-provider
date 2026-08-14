@@ -69,11 +69,13 @@ async function saveManagedProviderState(path: string, state: ManagedProviderStat
     }
     await rename(temporaryPath, path);
     await chmod(path, PROVIDER_STATE_FILE_MODE);
-    const directory = await open(parent, "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    if (process.platform !== "win32") {
+      const directory = await open(parent, "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } catch (error) {
     try {

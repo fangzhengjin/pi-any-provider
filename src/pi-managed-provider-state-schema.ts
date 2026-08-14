@@ -8,6 +8,7 @@ import {
   isSupportedProviderApi,
   validateManagedProviderDefinition,
 } from "./pi-managed-provider-contracts.js";
+import { isManagedProviderLanguagePreference } from "./pi-managed-provider-localization.js";
 import { normalizeProviderRootUrl } from "./pi-managed-provider-routing.js";
 
 function requireManagedProviderStateObject(value: unknown, label: string): Record<string, unknown> {
@@ -77,11 +78,13 @@ function parseManagedProviderDefinition(value: unknown): ManagedProviderDefiniti
 
 export function parseManagedProviderState(value: unknown): ManagedProviderState {
   const state = requireManagedProviderStateObject(value, "Provider state");
-  rejectUnknownManagedProviderStateKeys(state, ["version", "providers"], "Provider state");
+  rejectUnknownManagedProviderStateKeys(state, ["version", "language", "providers"], "Provider state");
   if (state.version !== 1) throw new Error("Unsupported provider state version");
+  const language = state.language === undefined ? "auto" : state.language;
+  if (!isManagedProviderLanguagePreference(language)) throw new Error("Provider state contains an unsupported language");
   if (!Array.isArray(state.providers)) throw new Error("Provider state must contain a provider list");
   const providers = state.providers.map(parseManagedProviderDefinition);
   const ids = providers.map((provider) => provider.id);
   if (new Set(ids).size !== ids.length) throw new Error("Provider identifiers must be unique");
-  return { version: 1, providers };
+  return { version: 1, language, providers };
 }
