@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { getKeybindings, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { parse } from "jsonc-parser";
 import {
   buildManagedProviderModel,
   discoverManagedProviderModelIds,
   parseManagedProviderCatalogResponse,
 } from "../src/pi-managed-provider-catalog.js";
-import { saveManagedProviderAndRestoreActiveModel } from "../src/pi-managed-provider-command.js";
+import {
+  runPiManagedProvidersCommand,
+  saveManagedProviderAndRestoreActiveModel,
+} from "../src/pi-managed-provider-command.js";
 import {
   createManagedProviderIdentifier,
   type ManagedProviderDefinition,
@@ -31,6 +35,7 @@ import {
   retainManagedProviderProtocolRulesForModels,
 } from "../src/pi-managed-provider-routing.js";
 import { parseManagedProviderState } from "../src/pi-managed-provider-state-schema.js";
+import { PiManagedProviderStructuredMenuComponent } from "../src/pi-managed-provider-structured-menu.js";
 import { PiManagedProviderHomeComponent } from "../src/pi-managed-provider-tui.js";
 
 const provider: ManagedProviderDefinition = {
@@ -322,6 +327,94 @@ describe("native model overrides", () => {
       "openai-responses",
       { forceAdaptiveThinking: true },
     )).toThrow("does not apply");
+  });
+});
+
+describe("structured provider menus", () => {
+  const passthroughTheme = {
+    fg(_color: string, text: string) { return text; },
+    bold(text: string) { return text; },
+  } as never;
+  const options = {
+    title: "模型协议能力",
+    description: "选择模型并查看当前协议和设置状态。",
+    columns: ["模型", "请求协议", "设置"] as const,
+    mainSectionTitle: "已配置模型（3） ",
+    items: [
+      { value: "short", label: "glm-5.2", details: ["Anthropic Messages", "PI 默认"] as const },
+      { value: "long", label: "claude-opus-4-8-20260201-extra-long-model-identifier", details: ["Anthropic Messages", "已自定义 1 项"] as const },
+      { value: "gpt", label: "gpt-5.4", details: ["OpenAI Responses", "已自定义 2 项"] as const },
+    ],
+    hint: "↑↓ 选择 · Enter 打开 · Esc 返回",
+  };
+
+  test("keeps protocol and status columns aligned when model names have different lengths", () => {
+    const component = new PiManagedProviderStructuredMenuComponent(options, passthroughTheme, () => {}, () => {});
+    const lines = component.render(100);
+    const rows = options.items.map((item) => lines.find((line) => line.includes(item.details[0]) && line.includes(item.details[1]))!);
+    expect(rows.every(Boolean)).toBe(true);
+    const plainRows = rows.map(stripTerminalSequences);
+    const protocolStarts = plainRows.map((line) => line.indexOf("Messages") >= 0 ? line.indexOf("Anthropic") : line.indexOf("OpenAI"));
+    const settingStarts = plainRows.map((line, index) => line.indexOf(options.items[index]!.details[1]));
+    expect(new Set(protocolStarts).size).toBe(1);
+    expect(new Set(settingStarts).size).toBe(1);
+    expect(rows[1]).toContain("…");
+  });
+
+  test("uses fixed detail indentation in a narrow terminal", () => {
+    const component = new PiManagedProviderStructuredMenuComponent(options, passthroughTheme, () => {}, () => {});
+    const lines = component.render(50);
+    const detailLines = lines.filter((line) => line.startsWith("    请求协议") || line.startsWith("    设置"));
+    expect(detailLines).toHaveLength(6);
+    expect(detailLines.every((line) => line.startsWith("    "))).toBe(true);
+    expect(lines.every((line) => visibleWidth(line) <= 50)).toBe(true);
+  });
+});
+
+describe("model protocol capability flow", () => {
+  test("shows each model protocol and custom-setting count before selection", async () => {
+    const renders: string[][] = [];
+    const selections = ["Model protocol capabilities (advanced)", "Back"];
+    let customCall = 0;
+    const theme = { fg(_color: string, text: string) { return text; }, bold(text: string) { return text; } };
+    const context = {
+      mode: "tui",
+      model: undefined,
+      modelRegistry: { getProvider() { return undefined; } },
+      ui: {
+        theme,
+        async select() { return selections.shift(); },
+        notify() {},
+        custom(factory: Function) {
+          customCall++;
+          return new Promise((resolve) => {
+            const component = factory({ requestRender() {} }, theme, getKeybindings(), resolve);
+            if (customCall === 1) {
+              component.handleInput?.("\x1b[B");
+              component.handleInput?.("\x1b[B");
+              component.handleInput?.("\r");
+            } else if (customCall === 2) {
+              renders.push(component.render(100), component.render(50));
+              component.handleInput?.("\x1b");
+            } else component.handleInput?.("\x1b");
+          });
+        },
+      },
+    };
+    const testProvider = { ...provider, modelSource: { type: "manual", modelIds: ["claude-opus-4-8", "gpt-5.4"] } };
+    const orchestrator = {
+      snapshot() { return { version: 1, language: "en", providers: [testProvider] }; },
+      hasConfiguredApiKey() { return true; },
+      async readModelOverrides(_providerId: string, modelId: string) {
+        return modelId === "claude-opus-4-8" ? { forceAdaptiveThinking: true } : {};
+      },
+    };
+    await runPiManagedProvidersCommand({} as never, context as never, orchestrator as never);
+    expect(renders[0]!.join("\n")).toContain("claude-opus-4-8");
+    expect(renders[0]!.join("\n")).toContain("Anthropic Messages");
+    expect(renders[0]!.join("\n")).toContain("1 custom");
+    expect(renders[0]!.join("\n")).toContain("OpenAI Responses");
+    expect(renders[1]!.join("\n")).toContain("    Request protocol  Anthropic Messages");
   });
 });
 

@@ -32,8 +32,10 @@ import {
   resolveProviderModelApi,
   retainManagedProviderProtocolRulesForModels,
 } from "./pi-managed-provider-routing.js";
+import { selectPiManagedProviderStructuredMenu } from "./pi-managed-provider-structured-menu.js";
 import {
   formatManagedProviderApi,
+  formatManagedProviderApiName,
   promptPiManagedProviderSecret,
   selectPiManagedProviderHome,
 } from "./pi-managed-provider-tui.js";
@@ -182,6 +184,7 @@ async function addManagedProvider(
       context,
       translator,
       provider.modelSource.modelIds,
+      provider.defaultApi,
       provider.protocolRules,
     );
     if (!protocolRules) return;
@@ -323,6 +326,7 @@ async function collectManagedProviderProtocolRules(
   context: ExtensionCommandContext,
   translator: ManagedProviderTranslator,
   modelIds: readonly string[],
+  defaultApi: SupportedProviderApi,
   initialRules: ManagedProviderDefinition["protocolRules"],
 ): Promise<ManagedProviderDefinition["protocolRules"] | undefined> {
   let exactRules = initialRules.filter(
@@ -354,9 +358,26 @@ async function collectManagedProviderProtocolRules(
         context.ui.notify(translator.t("everyModelConfigured"), "warning");
         continue;
       }
-      const modelId = await context.ui.select(translator.t("modelTitle"), [...available]);
+      const currentRules = [...exactRules, ...wildcardRules];
+      const modelItems = available.map((modelId) => {
+        const api = resolveProviderModelApi(modelId, defaultApi, currentRules);
+        return {
+          value: modelId,
+          label: modelId,
+          details: [formatManagedProviderApiName(api), translator.t("noExactProtocolRule")] as const,
+        };
+      });
+      const modelId = await selectPiManagedProviderStructuredMenu(context, {
+        title: translator.t("modelProtocolSelectionTitle"),
+        description: translator.t("modelProtocolSelectionDescription"),
+        columns: [translator.t("modelColumn"), translator.t("protocolColumn"), translator.t("settingsColumn")],
+        mainSectionTitle: translator.t("configuredModelsSection", { count: modelItems.length }),
+        items: modelItems,
+        hint: translator.t("structuredMenuHint"),
+      });
       if (!modelId) continue;
-      const api = await chooseManagedProviderApi(context, translator);
+      const currentApi = resolveProviderModelApi(modelId, defaultApi, currentRules);
+      const api = await chooseManagedProviderApi(context, translator, currentApi);
       if (!api || api === "keep") continue;
       exactRules.push({ pattern: modelId, api });
       continue;
@@ -427,6 +448,7 @@ async function manageManagedProviderProtocolRules(
     context,
     translator,
     provider.modelSource.modelIds,
+    provider.defaultApi,
     provider.protocolRules,
   );
   if (!rules || JSON.stringify(rules) === JSON.stringify(provider.protocolRules)) return;
@@ -448,11 +470,36 @@ async function manageManagedProviderModelOverrides(
   orchestrator: PiManagedProviderCommandOrchestrator,
   provider: ManagedProviderDefinition,
 ): Promise<void> {
-  const modelId = await context.ui.select(translator.t("modelTitle"), [...provider.modelSource.modelIds]);
+  const modelStates = new Map(await Promise.all(provider.modelSource.modelIds.map(async (modelId) => {
+    const api = resolveProviderModelApi(modelId, provider.defaultApi, provider.protocolRules);
+    const overrides = await orchestrator.readModelOverrides(provider.id, modelId);
+    return [modelId, { api, overrides }] as const;
+  })));
+  const modelItems = provider.modelSource.modelIds.map((modelId) => {
+    const state = modelStates.get(modelId)!;
+    const customCount = Object.keys(state.overrides).length;
+    return {
+      value: modelId,
+      label: modelId,
+      details: [
+        formatManagedProviderApiName(state.api),
+        customCount > 0
+          ? translator.t("customSettingsCount", { count: customCount })
+          : translator.t("piDefaults"),
+      ] as const,
+    };
+  });
+  const modelId = await selectPiManagedProviderStructuredMenu(context, {
+    title: translator.t("modelProtocolCapabilitiesTitle"),
+    description: translator.t("modelProtocolCapabilitiesDescription"),
+    columns: [translator.t("modelColumn"), translator.t("protocolColumn"), translator.t("settingsColumn")],
+    mainSectionTitle: translator.t("configuredModelsSection", { count: modelItems.length }),
+    items: modelItems,
+    hint: translator.t("structuredMenuHint"),
+  });
   if (!modelId) return;
-  const api = resolveProviderModelApi(modelId, provider.defaultApi, provider.protocolRules);
+  const { api, overrides: stored } = modelStates.get(modelId)!;
   const options = getManagedProviderBooleanOptions(api);
-  const stored = await orchestrator.readModelOverrides(provider.id, modelId);
   const allowed = new Set(options.map((option) => option.key));
   let draft = Object.fromEntries(
     Object.entries(stored).filter(([key]) => allowed.has(key as keyof ManagedProviderCompatOverrides)),
@@ -464,25 +511,41 @@ async function manageManagedProviderModelOverrides(
   const inheritedModel = buildManagedProviderModel(provider, modelId);
 
   for (;;) {
-    const labels = options.map((option) => {
+    const capabilityItems = options.map((option) => {
       const explicit = draft[option.key];
-      const state = explicit === undefined
-        ? translator.t("inherit")
-        : translator.t(explicit ? "enabled" : "disabled");
       const inherited = getManagedProviderInheritedBooleanValue(option, inheritedModel.compat);
       const effective = explicit ?? inherited;
-      return translator.t("modelOverrideOption", {
+      return {
+        value: option.key,
         label: translator.t(option.labelKey),
-        state,
-        effective: translator.t(effective ? "enabled" : "disabled"),
-      });
+        details: [
+          explicit === undefined
+            ? translator.t("piDefaults")
+            : translator.t(explicit ? "forceEnabled" : "forceDisabled"),
+          translator.t(effective ? "enabled" : "disabled"),
+        ] as const,
+      };
     });
-    const reset = translator.t("resetAllOverrides");
-    const save = translator.t("saveAndReturn");
-    const discard = translator.t("discardAndReturn");
-    const choice = await context.ui.select(translator.t("modelOverridesTitle", { model: modelId }), [
-      ...labels, reset, save, discard,
-    ]);
+    const reset = "__reset";
+    const save = "__save";
+    const discard = "__discard";
+    const choice = await selectPiManagedProviderStructuredMenu(context, {
+      title: translator.t("modelProtocolCapabilitiesTitle"),
+      description: translator.t("modelCapabilityEditorDescription", {
+        model: modelId,
+        protocol: formatManagedProviderApi(api),
+      }),
+      columns: [translator.t("capabilityColumn"), translator.t("policyColumn"), translator.t("effectiveColumn")],
+      mainSectionTitle: translator.t("capabilitiesSection"),
+      actionsSectionTitle: translator.t("actionsSection"),
+      items: [
+        ...capabilityItems,
+        { value: reset, label: translator.t("resetAllOverrides"), section: "actions" as const },
+        { value: save, label: translator.t("saveAndReturn"), section: "actions" as const },
+        { value: discard, label: translator.t("discardAndReturn"), section: "actions" as const },
+      ],
+      hint: translator.t("structuredMenuHint"),
+    });
     if (!choice || choice === discard) return;
     if (choice === reset) {
       draft = {};
@@ -498,18 +561,27 @@ async function manageManagedProviderModelOverrides(
       }
       return;
     }
-    const optionIndex = labels.indexOf(choice);
-    if (optionIndex < 0) continue;
-    const option = options[optionIndex]!;
-    const inherit = translator.t("inherit");
-    const enabled = translator.t("enabled");
-    const disabled = translator.t("disabled");
-    const state = await context.ui.select(translator.t("overrideStateTitle", {
-      label: translator.t(option.labelKey),
-    }), [inherit, enabled, disabled]);
-    if (state === inherit) delete draft[option.key];
-    else if (state === enabled) draft[option.key] = true;
-    else if (state === disabled) draft[option.key] = false;
+    const option = options.find((entry) => entry.key === choice);
+    if (!option) continue;
+    const inherited = getManagedProviderInheritedBooleanValue(option, inheritedModel.compat);
+    const state = await selectPiManagedProviderStructuredMenu(context, {
+      title: translator.t(option.labelKey),
+      description: translator.t(option.descriptionKey),
+      items: [
+        {
+          value: "default",
+          label: translator.t("usePiDefaultCurrent", {
+            value: translator.t(inherited ? "enabled" : "disabled"),
+          }),
+        },
+        { value: "enabled", label: translator.t("forceEnabled") },
+        { value: "disabled", label: translator.t("forceDisabled") },
+      ],
+      hint: translator.t("structuredMenuHint"),
+    });
+    if (state === "default") delete draft[option.key];
+    else if (state === "enabled") draft[option.key] = true;
+    else if (state === "disabled") draft[option.key] = false;
   }
 }
 
@@ -534,7 +606,9 @@ async function manageExistingManagedProvider(
     if (!provider) return;
     const editConnection = translator.t("editConnection");
     const manageSource = translator.t("manageModelSource");
-    const manageRouting = translator.t("manageProtocolRouting");
+    const manageRouting = `${translator.t("manageProtocolRouting")} · ${translator.t("defaultProtocolValue", {
+      protocol: formatManagedProviderApiName(provider.defaultApi),
+    })}`;
     const manageOverrides = translator.t("manageModelOverrides");
     const refreshModels = translator.t("refreshDiscoveredModels");
     const deleteProvider = translator.t("deleteProvider");

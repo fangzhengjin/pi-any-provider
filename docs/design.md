@@ -50,7 +50,9 @@ Unknown identifiers use conservative defaults. Every model receives exactly one 
 
 ## Native model overrides
 
-Advanced boolean compatibility options remain in PI's native `models.json` `modelOverrides` layer. The extension never stores a second copy in its provider state. Users select a configured model, then choose `Inherit`, `Enabled`, or `Disabled` for options allowed by that model's final protocol.
+Advanced boolean compatibility options remain in PI's native `models.json` `modelOverrides` layer. The extension never stores a second copy in its provider state. The UI calls these settings model protocol capabilities: users see each model's final protocol and custom-setting count before selection, then choose PI default, force enabled, or force disabled for options allowed by that protocol.
+
+The structured selectors reuse PI's selection primitive for keyboard behavior and scrolling. Wide terminals render display-width-aware Model/Protocol/Settings and Capability/Policy/Effective columns; narrow terminals render the same fields on fixed-indentation detail rows. Long identifiers are truncated only inside their own field.
 
 The override store reads JSONC, changes only the selected property path, preserves comments and unrelated providers, serializes plugin writers with a lock, keeps a 0600 rolling backup, fsyncs a temporary file, and atomically replaces `models.json`. The command then calls PI's existing model-registry refresh for the affected provider and rebinds the active model. Refresh or rebind failure restores the previous file and refreshes the previous runtime state.
 
@@ -62,7 +64,7 @@ Editing an existing provider collects URL, key, and default fallback protocol be
 
 The protocol-routing screen selects exact models from the provider's model list and accepts typed patterns only for wildcard fallbacks. Exact settings are not ordered; wildcard fallbacks can be moved and use first-match semantics.
 
-The provider action screen exposes edit connection, manage model source, manage protocol routing, manage native model overrides, refresh models, and delete. Updating the active provider or its model overrides reselects the same model after registration or refresh. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
+The provider action screen exposes edit connection, manage model source, configure model request protocols, manage advanced model protocol capabilities, refresh models, and delete. Updating the active provider or its native overrides reselects the same model after registration or refresh. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
 
 Automatic language selection first checks the operating-system UI language list, then terminal message locales, JavaScript Intl, and finally English. macOS, Windows, and Linux/Unix use platform-specific sources. Explicit language selection is persisted and takes precedence immediately without reload.
 
@@ -78,4 +80,4 @@ Automatic language selection first checks the operating-system UI language list,
 
 ## Explicit exclusions
 
-No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, stale model cache policy, configuration migration framework, or custom stream implementation. The model override editor is intentionally limited to protocol-allowlisted boolean compatibility fields and writes PI's native format rather than introducing a plugin-specific compatibility schema.
+No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, stale model cache policy, configuration migration framework, or custom stream implementation. The protocol-capability editor is intentionally limited to protocol-allowlisted boolean compatibility fields and writes PI's native override format rather than introducing a plugin-specific compatibility schema.

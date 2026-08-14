@@ -42,28 +42,29 @@ export type ManagedProviderCompatOverrides = Partial<Record<ManagedProviderBoole
 export interface ManagedProviderBooleanOption {
   key: ManagedProviderBooleanCompatKey;
   labelKey: ManagedProviderMessageKey;
+  descriptionKey: ManagedProviderMessageKey;
   defaultValue: boolean;
 }
 
 const ANTHROPIC_OPTIONS: readonly ManagedProviderBooleanOption[] = [
-  { key: "forceAdaptiveThinking", labelKey: "adaptiveThinking", defaultValue: false },
-  { key: "supportsTemperature", labelKey: "temperature", defaultValue: true },
-  { key: "supportsStrictTools", labelKey: "strictJsonTools", defaultValue: false },
-  { key: "supportsEagerToolInputStreaming", labelKey: "eagerToolStreaming", defaultValue: true },
-  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", defaultValue: true },
-  { key: "supportsCacheControlOnTools", labelKey: "toolCacheControl", defaultValue: true },
-  { key: "sendSessionAffinityHeaders", labelKey: "sessionAffinityHeaders", defaultValue: false },
-  { key: "allowEmptySignature", labelKey: "emptyThinkingSignature", defaultValue: false },
-  { key: "supportsToolReferences", labelKey: "toolReferences", defaultValue: false },
+  { key: "forceAdaptiveThinking", labelKey: "adaptiveThinking", descriptionKey: "adaptiveThinkingDescription", defaultValue: false },
+  { key: "supportsTemperature", labelKey: "temperature", descriptionKey: "temperatureDescription", defaultValue: true },
+  { key: "supportsStrictTools", labelKey: "strictJsonTools", descriptionKey: "strictJsonToolsDescription", defaultValue: false },
+  { key: "supportsEagerToolInputStreaming", labelKey: "eagerToolStreaming", descriptionKey: "eagerToolStreamingDescription", defaultValue: true },
+  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", descriptionKey: "longCacheRetentionDescription", defaultValue: true },
+  { key: "supportsCacheControlOnTools", labelKey: "toolCacheControl", descriptionKey: "toolCacheControlDescription", defaultValue: true },
+  { key: "sendSessionAffinityHeaders", labelKey: "sessionAffinityHeaders", descriptionKey: "sessionAffinityHeadersDescription", defaultValue: false },
+  { key: "allowEmptySignature", labelKey: "emptyThinkingSignature", descriptionKey: "emptyThinkingSignatureDescription", defaultValue: false },
+  { key: "supportsToolReferences", labelKey: "toolReferences", descriptionKey: "toolReferencesDescription", defaultValue: false },
 ];
 
 const OPENAI_RESPONSES_OPTIONS: readonly ManagedProviderBooleanOption[] = [
-  { key: "supportsDeveloperRole", labelKey: "developerRole", defaultValue: true },
-  { key: "supportsStrictMode", labelKey: "strictJsonTools", defaultValue: false },
-  { key: "supportsOpenAIGrammarTools", labelKey: "openAiGrammarTools", defaultValue: false },
-  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", defaultValue: true },
-  { key: "supportsExplicitPromptCacheMode", labelKey: "explicitPromptCacheMode", defaultValue: false },
-  { key: "supportsToolSearch", labelKey: "toolSearch", defaultValue: false },
+  { key: "supportsDeveloperRole", labelKey: "developerRole", descriptionKey: "developerRoleDescription", defaultValue: true },
+  { key: "supportsStrictMode", labelKey: "strictJsonTools", descriptionKey: "strictJsonToolsDescription", defaultValue: false },
+  { key: "supportsOpenAIGrammarTools", labelKey: "openAiGrammarTools", descriptionKey: "openAiGrammarToolsDescription", defaultValue: false },
+  { key: "supportsLongCacheRetention", labelKey: "longCacheRetention", descriptionKey: "longCacheRetentionDescription", defaultValue: true },
+  { key: "supportsExplicitPromptCacheMode", labelKey: "explicitPromptCacheMode", descriptionKey: "explicitPromptCacheModeDescription", defaultValue: false },
+  { key: "supportsToolSearch", labelKey: "toolSearch", descriptionKey: "toolSearchDescription", defaultValue: false },
 ];
 
 export const ALL_MANAGED_PROVIDER_COMPAT_KEYS = [...new Set([

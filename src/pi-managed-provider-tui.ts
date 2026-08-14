@@ -23,8 +23,13 @@ export type PiManagedProviderHomeChoice =
   | { type: "language" }
   | { type: "provider"; providerId: string };
 
+export function formatManagedProviderApiName(api: SupportedProviderApi): string {
+  return api === "anthropic-messages" ? "Anthropic Messages" : "OpenAI Responses";
+}
+
 export function formatManagedProviderApi(api: SupportedProviderApi): string {
-  return api === "anthropic-messages" ? "Anthropic Messages · /v1/messages" : "OpenAI Responses · /v1/responses";
+  const path = api === "anthropic-messages" ? "/v1/messages" : "/v1/responses";
+  return `${formatManagedProviderApiName(api)} · ${path}`;
 }
 
 export class PiManagedProviderHomeComponent implements Component {

@@ -69,13 +69,13 @@ describe("extension integration", () => {
         "Anthropic Messages · /v1/messages",
         "Add model identifiers manually",
         "Set protocol for a model",
-        "model-one",
         "OpenAI Responses · /v1/responses",
         "Save and return",
       ];
       let customCall = 0;
       const inputTitles = [];
       const selectTitles = [];
+      const customRenders = [];
       const notifications = [];
       const confirmations = [true, true];
       const theme = {
@@ -104,6 +104,9 @@ describe("extension integration", () => {
               else if (customCall === 2) {
                 for (const character of "manual-secret") component.handleInput?.(character);
                 component.handleInput?.("\\r");
+              } else if (customCall === 3) {
+                customRenders.push(component.render(100));
+                component.handleInput?.("\\r");
               } else component.handleInput?.("\\x1b");
             });
           },
@@ -124,6 +127,7 @@ describe("extension integration", () => {
         mode: (await stat(statePath)).mode & 0o777,
         inputTitles,
         selectTitles,
+        customRenders,
         notifications,
       }));
     `;
@@ -148,10 +152,15 @@ describe("extension integration", () => {
       mode: number;
       inputTitles: string[];
       selectTitles: string[];
+      customRenders: string[][];
     };
     expect(output.inputTitles).toEqual(["Provider name", "API URL", "Model identifiers"]);
     expect(output.selectTitles).toContain("Default protocol · fallback when no model rule matches");
-    expect(output.selectTitles).toContain("Model");
+    const protocolModelPage = output.customRenders[0]!.join("\n");
+    expect(protocolModelPage).toContain("Model request protocol");
+    expect(protocolModelPage).toContain("model-one");
+    expect(protocolModelPage).toContain("Anthropic Messages");
+    expect(protocolModelPage).toContain("Fallback/default");
     expect(output.stateContainsSecret).toBe(false);
     expect(output.storedKey).toBe("manual-secret");
     expect(output.state.providers[0]).toMatchObject({

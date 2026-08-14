@@ -82,7 +82,7 @@ Exact model identifiers reuse PI's known protocol-neutral capabilities, includin
 
 Unknown models use conservative defaults. Costs remain zero because a custom gateway route does not establish upstream pricing.
 
-Advanced model corrections continue to use PI's native model overrides. Select **Manage model overrides**, choose a model, then set each protocol-appropriate boolean option to **Inherit**, **Enabled**, or **Disabled**. Inherit removes the explicit field and shows the effective inherited value.
+Advanced model corrections appear as **Model protocol capabilities (advanced)**. The model picker shows aligned Model, Request protocol, and Settings columns on wide terminals, then switches to fixed-indentation detail rows on narrow terminals. Each capability explains what it controls and can use the PI default, be forced enabled, or be forced disabled. Restoring the PI default removes the explicit native override.
 
 The extension edits `~/.pi/agent/models.json` with JSONC path-level changes, preserving comments, formatting, unrelated providers, and unknown legal settings. It keeps a 0600 rolling backup at `models.json.pi-custom-provider-backup`, refreshes only the affected provider, and reselects the active model. If refresh fails, the previous file and runtime are restored.
 
