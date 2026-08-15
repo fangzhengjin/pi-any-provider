@@ -558,6 +558,9 @@ describe("model protocol capability flow", () => {
             } else if (customCall === 3) {
               renders.push(component.render(100));
               component.handleInput?.("\x1b");
+            } else if (customCall === 4) {
+              renders.push(component.render(100));
+              component.handleInput?.("\x1b");
             } else component.handleInput?.("\x1b");
           });
         },
@@ -583,6 +586,9 @@ describe("model protocol capability flow", () => {
     expect(capabilityPage).toContain("Force disabled");
     expect(capabilityPage).toContain("Default (Enabled)");
     expect(capabilityPage).not.toContain("Effective");
+    const returnedModelList = renders[3]!.join("\n");
+    expect(returnedModelList).toContain("claude-opus-4-8");
+    expect(returnedModelList).toContain("Request protocol");
   });
 });
 
@@ -590,6 +596,7 @@ describe("model removal flow", () => {
   test("persists a discovered model as ignored and removes its exact protocol rule", async () => {
     const selections = ["Manage model list", "Back"];
     let customCall = 0;
+    let returnedModelList = "";
     let savedProvider: ManagedProviderDefinition | undefined;
     const discoveredProvider: ManagedProviderDefinition = {
       ...provider,
@@ -618,7 +625,10 @@ describe("model removal flow", () => {
               component.handleInput?.("\x1b[B");
               component.handleInput?.("\r");
             } else if (customCall === 3) component.handleInput?.("\r");
-            else component.handleInput?.("\x1b");
+            else if (customCall === 4) {
+              returnedModelList = component.render(100).join("\n");
+              component.handleInput?.("\x1b");
+            } else component.handleInput?.("\x1b");
           });
         },
       },
@@ -635,6 +645,9 @@ describe("model removal flow", () => {
       ignoredModelIds: ["wan-image"],
     });
     expect(savedProvider?.protocolRules).toEqual([]);
+    expect(returnedModelList).toContain("Models");
+    expect(returnedModelList).toContain("chat-model");
+    expect(returnedModelList).not.toContain("wan-image");
   });
 });
 
