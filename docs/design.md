@@ -19,7 +19,7 @@ The orchestrator owns sequencing only. Each leaf owns its validation and file op
 
 ## Stored state
 
-Provider settings and the interface-language preference live in one internal state file in the PI agent extension settings directory. The file is not a public configuration interface and is user-readable/writable only. API keys are written through PI's native credential storage and never enter extension state. State mutations are serialized with a lock and replace the target atomically.
+Provider settings and the interface-language preference live in one internal state file in the PI agent extension settings directory. The file is not a public configuration interface and is user-readable/writable only. API keys are written through PI's native credential storage and never enter extension state. State mutations use a cross-process mutation lock, reread the latest state inside that boundary, and replace the target atomically so concurrent provider refreshes preserve one another.
 
 A configured provider contains:
 
@@ -42,7 +42,7 @@ The TUI accepts a gateway root URL. A trailing `/v1` is normalized away.
 
 ## Model construction
 
-Discovery accepts the standard `{ "data": [{ "id": "..." }] }` response only. Identifiers must be non-empty, unique, and free of control characters.
+Discovery accepts the standard `{ "data": [{ "id": "..." }] }` response only. Identifiers must be non-empty, unique, and free of control characters. Discover-backed registrations expose PI's native `refreshModels` callback. Cache-only refresh phases return the saved snapshot without network access; network phases use PI's resolved credential and shared abort signal. Successful startup refreshes update state and protocol profiles before publishing the new runtime list. Manual sources do not register a refresh callback.
 
 For an exact identifier found in PI's built-in catalog, the extension copies protocol-neutral fields: display name, reasoning flag, thinking level map, input types, context window, and maximum output. Costs remain zero because a gateway route does not prove upstream pricing. When the built-in model already uses the selected protocol, the extension also retains only that protocol's allowed compatibility fields. It never copies provider, URL, headers, or sampling parameters; cross-protocol compatibility fields are discarded.
 
@@ -75,7 +75,8 @@ Automatic language selection first checks the operating-system UI language list,
 ## Failure behavior
 
 - Invalid configuration prevents the affected operation and reports the exact problem.
-- Failed discovery does not publish an empty or fabricated model list.
+- Failed discovery throws into PI's refresh result and does not publish an empty or fabricated model list. PI's background startup refresh keeps this non-blocking; user-triggered model refresh may display PI's cached-model warning.
+- Automatic refresh commits are serialized across providers. A state-save failure rolls back the profile write; an active configured model omitted by the gateway remains in the snapshot until the user switches away and a later refresh removes it.
 - A failed edit leaves the previous registered provider and stored configuration active.
 - API keys are never included in thrown messages.
 - Native protocol-profile writes keep a backup and restore the previous file and runtime if profile materialization, registration, refresh, or rebind fails.
@@ -84,4 +85,4 @@ Automatic language selection first checks the operating-system UI language list,
 
 ## Explicit exclusions
 
-No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, stale model cache policy, general configuration migration framework, or custom stream implementation. The protocol-capability editor is limited to the selected protocol's complete compatibility contract and writes PI's native override format rather than introducing a plugin-specific compatibility schema.
+No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, independent TTL/Model Store catalog, general configuration migration framework, or custom stream implementation. The protocol-capability editor is limited to the selected protocol's complete compatibility contract and writes PI's native override format rather than introducing a plugin-specific compatibility schema.

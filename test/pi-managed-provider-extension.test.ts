@@ -24,7 +24,7 @@ async function createIsolatedPiAgent(): Promise<string> {
           id: "integration-provider",
           name: "Integration Provider",
           rootUrl: "https://gateway.example.com",
-          modelSource: { type: "manual", modelIds: ["claude-opus-4-8", "gpt-5.4"] },
+          modelSource: { type: "discover", modelIds: ["claude-opus-4-8", "gpt-5.4"], ignoredModelIds: [] },
           defaultApi: "anthropic-messages",
           protocolRules: [{ pattern: "gpt-*", api: "openai-responses" }],
         },
@@ -62,6 +62,7 @@ describe("extension integration", () => {
         registerProvider(id, config) { registrations.push({ id, config }); },
         unregisterProvider() {},
         registerCommand(_name, options) { command = options; },
+        on() {},
       };
       await extension(pi);
       const inputs = ["Manual Provider", "https://manual.example.com/v1/", "model-one, model-two"];
@@ -124,6 +125,7 @@ describe("extension integration", () => {
         stateContainsSecret: stateText.includes("manual-secret"),
         storedKey: auth["manual-provider"]?.key,
         registration: registrations.at(-1),
+        refreshable: typeof registrations.at(-1)?.config.refreshModels === "function",
         mode: (await stat(statePath)).mode & 0o777,
         inputTitles,
         selectTitles,
@@ -149,6 +151,7 @@ describe("extension integration", () => {
       stateContainsSecret: boolean;
       storedKey: string;
       registration: { id: string; config: { models: Array<{ id: string }> } };
+      refreshable: boolean;
       mode: number;
       inputTitles: string[];
       selectTitles: string[];
@@ -170,6 +173,7 @@ describe("extension integration", () => {
     });
     expect(output.registration.id).toBe("manual-provider");
     expect(output.registration.config.models.map((model) => model.id)).toEqual(["model-one", "model-two"]);
+    expect(output.refreshable).toBe(false);
     expect(output.mode).toBe(0o600);
   });
 
@@ -184,10 +188,16 @@ describe("extension integration", () => {
         registerProvider(id, config) { registrations.push({ id, config }); },
         unregisterProvider() {},
         registerCommand(name, options) { commands.push({ name, options }); },
+        on() {},
       };
       await extension(pi);
       const modelsText = await readFile(${JSON.stringify(join(agentDir, "models.json"))}, "utf8");
-      process.stdout.write(JSON.stringify({ registrations, modelsText, commands: commands.map((entry) => entry.name) }));
+      process.stdout.write(JSON.stringify({
+        registrations,
+        refreshable: registrations.map((entry) => typeof entry.config.refreshModels === "function"),
+        modelsText,
+        commands: commands.map((entry) => entry.name),
+      }));
     `;
     const result = Bun.spawnSync([process.execPath, "-e", script], {
       cwd: join(import.meta.dir, ".."),
@@ -198,11 +208,13 @@ describe("extension integration", () => {
     expect(result.exitCode).toBe(0);
     const output = JSON.parse(result.stdout.toString()) as {
       registrations: Array<{ id: string; config: { models: Array<{ id: string; api: string; baseUrl: string; compat: Record<string, unknown> }> } }>;
+      refreshable: boolean[];
       modelsText: string;
       commands: string[];
     };
     expect(output.commands).toContain("providers");
     expect(output.registrations).toHaveLength(1);
+    expect(output.refreshable).toEqual([true]);
     const models = output.registrations[0]!.config.models;
     expect(models.find((model) => model.id === "claude-opus-4-8")).toMatchObject({
       api: "anthropic-messages",

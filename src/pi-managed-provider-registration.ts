@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition } from "./pi-managed-provider-contracts.js";
 import { assertPiManagedProviderCaller } from "./pi-managed-provider-access.js";
 import { buildPiManagedProviderConfig } from "./pi-managed-provider-config.js";
@@ -6,8 +6,12 @@ import { buildPiManagedProviderConfig } from "./pi-managed-provider-config.js";
 class PiManagedProviderRegistrationAccess {
   private readonly registeredProviderIds = new Set<string>();
 
-  register(pi: ExtensionAPI, provider: ManagedProviderDefinition): void {
-    pi.registerProvider(provider.id, buildPiManagedProviderConfig(provider));
+  register(
+    pi: ExtensionAPI,
+    provider: ManagedProviderDefinition,
+    refreshModels?: ProviderConfig["refreshModels"],
+  ): void {
+    pi.registerProvider(provider.id, buildPiManagedProviderConfig(provider, refreshModels));
     this.registeredProviderIds.add(provider.id);
   }
 
@@ -15,9 +19,10 @@ class PiManagedProviderRegistrationAccess {
     pi: ExtensionAPI,
     previous: ManagedProviderDefinition | undefined,
     next: ManagedProviderDefinition,
+    refreshModels?: ProviderConfig["refreshModels"],
   ): void {
     if (previous && previous.id !== next.id) throw new Error("Provider ID cannot change during an update");
-    this.register(pi, next);
+    this.register(pi, next, refreshModels);
   }
 
   unregister(pi: ExtensionAPI, providerId: string): void {

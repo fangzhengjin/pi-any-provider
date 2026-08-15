@@ -6,6 +6,9 @@ export default async function piCustomProviderExtension(pi: ExtensionAPI): Promi
   const orchestrator = createPiManagedProviderOrchestrator();
   await orchestrator.load(pi);
 
+  pi.on("session_start", (_event, context) => orchestrator.setActiveModel(context.model));
+  pi.on("model_select", (event) => orchestrator.setActiveModel(event.model));
+
   pi.registerCommand("providers", {
     description: "Manage custom model providers",
     handler: async (_args, context) => runPiManagedProvidersCommand(pi, context, orchestrator),

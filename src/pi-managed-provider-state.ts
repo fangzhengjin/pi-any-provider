@@ -94,6 +94,23 @@ class PiManagedProviderStateAccess {
 
   constructor(private readonly path: string) {}
 
+  private async mutate(
+    transform: (current: ManagedProviderState) => ManagedProviderState,
+  ): Promise<ManagedProviderState> {
+    await mkdir(dirname(this.path), { recursive: true, mode: PROVIDER_STATE_DIRECTORY_MODE });
+    await chmod(dirname(this.path), PROVIDER_STATE_DIRECTORY_MODE);
+    const release = await acquireProviderStateLock(`${this.path}.mutation.lock`);
+    try {
+      const current = await loadManagedProviderState(this.path);
+      const next = parseManagedProviderState(transform(current));
+      await saveManagedProviderState(this.path, next);
+      this.current = structuredClone(next);
+      return structuredClone(next);
+    } finally {
+      await release();
+    }
+  }
+
   async initialize(): Promise<void> {
     this.current = await loadManagedProviderState(this.path);
   }
@@ -103,9 +120,11 @@ class PiManagedProviderStateAccess {
   }
 
   async replace(state: ManagedProviderState): Promise<void> {
-    const validated = parseManagedProviderState(state);
-    await saveManagedProviderState(this.path, validated);
-    this.current = structuredClone(validated);
+    await this.mutate(() => state);
+  }
+
+  update(transform: (current: ManagedProviderState) => ManagedProviderState): Promise<ManagedProviderState> {
+    return this.mutate(transform);
   }
 }
 

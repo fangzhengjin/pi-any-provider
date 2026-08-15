@@ -16,6 +16,7 @@ It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses i
 - Automatic PI built-in capability reuse without cross-protocol compatibility leakage
 - Complete native compatibility profiles materialized for each final request protocol
 - Persistent removal and restoration of unusable discovered models
+- Background `/v1/models` refresh through PI's native startup catalog lifecycle
 - Automatic operating-system language detection plus English and Simplified Chinese
 
 Chat Completions is intentionally unsupported.
@@ -78,6 +79,8 @@ When editing an existing provider:
 The active provider can be edited or refreshed. PI automatically reselects the same model after registration changes. Switch providers only before deleting the active provider or removing the active model from its model list.
 
 **Manage model list** shows every model's final request protocol and source. Manual models can be removed directly. Discovered models are removed and added to an ignored list so future `/v1/models` refreshes do not restore image-generation, embedding, reranking, speech, or other unusable entries. Ignored models can be restored after the gateway confirms they are still published. The active model and the provider's final remaining model cannot be removed.
+
+On normal interactive startup, discovered providers participate in PI's native background catalog refresh. Successful responses atomically update the saved snapshot, remove obsolete exact protocol rules, and materialize profiles for new models. The active model is retained if the gateway temporarily omits it. A failed or timed-out refresh keeps the previous models and does not interrupt startup; opening PI's model selector later may show PI's standard cached-model warning. Manual model sources never perform startup discovery. `pi --list-models` remains cache-only and shows the last successful snapshot.
 
 ## Model metadata
 

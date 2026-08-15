@@ -4,10 +4,12 @@ import {
   getAgentDir,
   type ExtensionAPI,
   type ExtensionCommandContext,
+  type ProviderConfig,
 } from "@earendil-works/pi-coding-agent";
 import type { ManagedProviderDefinition, ManagedProviderState } from "./pi-managed-provider-contracts.js";
 import {
   buildManagedProviderModel,
+  buildManagedProviderModels,
   discoverManagedProviderModelIds,
 } from "./pi-managed-provider-catalog.js";
 import {
@@ -22,7 +24,10 @@ import {
   bindPiManagedProviderModelOverrides,
   type ManagedProviderProtocolProfileEntry,
 } from "./pi-managed-provider-model-overrides.js";
-import { resolveProviderModelApi } from "./pi-managed-provider-routing.js";
+import {
+  resolveProviderModelApi,
+  retainManagedProviderProtocolRulesForModels,
+} from "./pi-managed-provider-routing.js";
 import { bindPiManagedProviderCredentials } from "./pi-managed-provider-credentials.js";
 import { bindPiManagedProviderRegistration } from "./pi-managed-provider-registration.js";
 import { bindPiManagedProviderState } from "./pi-managed-provider-state.js";
@@ -41,6 +46,49 @@ const piManagedProviderModelOverrides = await bindPiManagedProviderModelOverride
   PI_MANAGED_PROVIDER_ORCHESTRATOR_PATH,
   PI_MANAGED_PROVIDER_MODELS_PATH,
 );
+
+type ManagedProviderRefreshModels = NonNullable<ProviderConfig["refreshModels"]>;
+type ManagedProviderRefreshContext = Parameters<ManagedProviderRefreshModels>[0];
+
+type ManagedProviderActiveModel = { provider: string; id: string };
+
+function hasSameManagedProviderRefreshConfiguration(
+  current: ManagedProviderDefinition,
+  expected: ManagedProviderDefinition,
+): boolean {
+  return current.id === expected.id
+    && current.name === expected.name
+    && current.rootUrl === expected.rootUrl
+    && current.defaultApi === expected.defaultApi
+    && current.modelSource.type === "discover"
+    && expected.modelSource.type === "discover"
+    && JSON.stringify(current.modelSource.ignoredModelIds) === JSON.stringify(expected.modelSource.ignoredModelIds)
+    && JSON.stringify(current.protocolRules) === JSON.stringify(expected.protocolRules);
+}
+
+function createAutomaticallyRefreshedProvider(
+  provider: ManagedProviderDefinition,
+  discoveredModelIds: readonly string[],
+  activeModel: ManagedProviderActiveModel | undefined,
+): ManagedProviderDefinition {
+  if (provider.modelSource.type !== "discover") return provider;
+  const ignored = new Set(provider.modelSource.ignoredModelIds);
+  const modelIds = discoveredModelIds.filter((modelId) => !ignored.has(modelId));
+  if (
+    activeModel?.provider === provider.id
+    && provider.modelSource.modelIds.includes(activeModel.id)
+    && !ignored.has(activeModel.id)
+    && !modelIds.includes(activeModel.id)
+  ) {
+    modelIds.push(activeModel.id);
+  }
+  if (modelIds.length === 0) throw new ManagedProviderLocalizedError("allDiscoveredModelsIgnored");
+  return {
+    ...provider,
+    modelSource: { ...provider.modelSource, modelIds },
+    protocolRules: retainManagedProviderProtocolRulesForModels(provider.protocolRules, modelIds),
+  };
+}
 
 function createManagedProviderProtocolProfileEntries(
   providers: readonly ManagedProviderDefinition[],
@@ -61,6 +109,114 @@ function createManagedProviderProtocolProfileEntries(
 }
 
 class PiManagedProviderOrchestrator {
+  private activeModel: ManagedProviderActiveModel | undefined;
+  private automaticRefreshCommit: Promise<void> = Promise.resolve();
+
+  setActiveModel(model: ManagedProviderActiveModel | undefined): void {
+    this.activeModel = model ? { ...model } : undefined;
+  }
+
+  private refreshModelsFor(provider: ManagedProviderDefinition): ManagedProviderRefreshModels | undefined {
+    return provider.modelSource.type === "discover"
+      ? (context) => this.refreshDiscoveredProvider(provider.id, context)
+      : undefined;
+  }
+
+  private registerProvider(pi: ExtensionAPI, provider: ManagedProviderDefinition): void {
+    piManagedProviderRegistration.register(pi, provider, this.refreshModelsFor(provider));
+  }
+
+  private replaceProvider(
+    pi: ExtensionAPI,
+    previous: ManagedProviderDefinition | undefined,
+    next: ManagedProviderDefinition,
+  ): void {
+    piManagedProviderRegistration.replace(pi, previous, next, this.refreshModelsFor(next));
+  }
+
+  private enqueueAutomaticRefreshCommit<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.automaticRefreshCommit.then(operation, operation);
+    this.automaticRefreshCommit = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+
+  private async commitAutomaticallyRefreshedProvider(
+    expected: ManagedProviderDefinition,
+    discoveredModelIds: readonly string[],
+  ): Promise<ReturnType<typeof buildManagedProviderModels>> {
+    const latest = piManagedProviderState.snapshot().providers.find((entry) => entry.id === expected.id);
+    if (!latest) throw new ManagedProviderLocalizedError("unknownProvider", { provider: expected.id });
+    if (!hasSameManagedProviderRefreshConfiguration(latest, expected)) {
+      throw new Error(`Provider ${expected.id} changed while automatic model refresh was running`);
+    }
+    const activeModel = this.activeModel ? { ...this.activeModel } : undefined;
+    const next = createAutomaticallyRefreshedProvider(latest, discoveredModelIds, activeModel);
+    const models = buildManagedProviderModels(next, next.modelSource.modelIds);
+    if (JSON.stringify(next.modelSource) === JSON.stringify(latest.modelSource)
+      && JSON.stringify(next.protocolRules) === JSON.stringify(latest.protocolRules)) {
+      return models;
+    }
+
+    const profileWrite = await piManagedProviderModelOverrides.materialize(
+      createManagedProviderProtocolProfileEntries([next]),
+    );
+    try {
+      await piManagedProviderState.update((currentState) => {
+        const current = currentState.providers.find((entry) => entry.id === expected.id);
+        if (!current) throw new ManagedProviderLocalizedError("unknownProvider", { provider: expected.id });
+        if (!hasSameManagedProviderRefreshConfiguration(current, expected)) {
+          throw new Error(`Provider ${expected.id} changed before the automatic model refresh could be saved`);
+        }
+        const refreshed = createAutomaticallyRefreshedProvider(current, discoveredModelIds, activeModel);
+        return {
+          ...currentState,
+          providers: currentState.providers.map((entry) => entry.id === expected.id ? refreshed : entry),
+        };
+      });
+      return models;
+    } catch (error) {
+      try {
+        await profileWrite.rollback();
+      } catch (rollbackError) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; model profile rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async refreshDiscoveredProvider(
+    providerId: string,
+    context: ManagedProviderRefreshContext,
+  ): ReturnType<ManagedProviderRefreshModels> {
+    const provider = piManagedProviderState.snapshot().providers.find((entry) => entry.id === providerId);
+    if (!provider) throw new ManagedProviderLocalizedError("unknownProvider", { provider: providerId });
+    if (provider.modelSource.type !== "discover" || !context.allowNetwork) {
+      return buildManagedProviderModels(provider, provider.modelSource.modelIds);
+    }
+    if (context.credential?.type !== "api_key" || !context.credential.key) {
+      throw new Error(`Automatic model refresh failed for ${providerId}: no API key is available`);
+    }
+    try {
+      const discoveredModelIds = await discoverManagedProviderModelIds(
+        provider.rootUrl,
+        context.credential.key,
+        context.signal,
+      );
+      context.signal.throwIfAborted();
+      return await this.enqueueAutomaticRefreshCommit(() =>
+        this.commitAutomaticallyRefreshedProvider(provider, discoveredModelIds)
+      );
+    } catch (error) {
+      throw new Error(
+        `Automatic model refresh failed for ${providerId}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
   async load(pi: ExtensionAPI): Promise<void> {
     await piManagedProviderState.initialize();
     const providers = piManagedProviderState.snapshot().providers;
@@ -70,7 +226,7 @@ class PiManagedProviderOrchestrator {
     const registered: string[] = [];
     try {
       for (const provider of providers) {
-        piManagedProviderRegistration.register(pi, provider);
+        this.registerProvider(pi, provider);
         registered.push(provider.id);
       }
     } catch (error) {
@@ -136,11 +292,11 @@ class PiManagedProviderOrchestrator {
       profileWrite = await piManagedProviderModelOverrides.materialize(
         createManagedProviderProtocolProfileEntries([provider]),
       );
-      piManagedProviderRegistration.replace(pi, current, provider);
+      this.replaceProvider(pi, current, provider);
       try {
         await piManagedProviderState.replace(nextState);
       } catch (error) {
-        if (current) piManagedProviderRegistration.replace(pi, provider, current);
+        if (current) this.replaceProvider(pi, provider, current);
         else piManagedProviderRegistration.unregister(pi, provider.id);
         throw error;
       }
@@ -178,7 +334,7 @@ class PiManagedProviderOrchestrator {
         piManagedProviderRegistration.unregister(pi, providerId);
       } catch (error) {
         await piManagedProviderState.replace(currentState);
-        piManagedProviderRegistration.register(pi, existing);
+        this.registerProvider(pi, existing);
         throw error;
       }
     } catch (error) {
