@@ -17,32 +17,24 @@
 
 ## 安装
 
-### 从 GitHub 安装（推荐）
-
 为当前用户全局安装：
 
 ```bash
-pi install git:github.com/fangzhengjin/pi-any-provider
+pi install npm:pi-any-provider
 ```
 
-也可以使用完整的 HTTPS 地址：
+安装完成后重新启动 PI，再执行 `/providers`。
+
+更新：
 
 ```bash
-pi install https://github.com/fangzhengjin/pi-any-provider
-```
-
-PI 会克隆仓库并自动安装运行依赖。安装完成后重新启动 PI，再执行 `/providers`。
-
-更新通过 Git 安装的扩展：
-
-```bash
-pi update --extensions
+pi update npm:pi-any-provider
 ```
 
 卸载：
 
 ```bash
-pi remove git:github.com/fangzhengjin/pi-any-provider
+pi remove npm:pi-any-provider
 ```
 
 ### 临时试用
@@ -50,12 +42,8 @@ pi remove git:github.com/fangzhengjin/pi-any-provider
 无需安装即可运行：
 
 ```bash
-pi -e git:github.com/fangzhengjin/pi-any-provider
+pi -e npm:pi-any-provider
 ```
-
-### 关于 npm
-
-目前直接从 GitHub 安装即可，不依赖 npm 发布。
 
 ## 快速开始
 
