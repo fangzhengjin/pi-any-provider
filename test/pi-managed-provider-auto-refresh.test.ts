@@ -18,9 +18,9 @@ test("PI native refresh updates discovered providers and preserves cached models
       const state={version:1,language:"en",providers:[
         {id:"AutoOne",name:"Auto One",rootUrl:base+"/one",modelSource:{type:"discover",modelIds:["old-one"],ignoredModelIds:["ignored-one"]},defaultApi:"anthropic-messages",protocolRules:[]},
         {id:"AutoTwo",name:"Auto Two",rootUrl:base+"/two",modelSource:{type:"discover",modelIds:["old-two"],ignoredModelIds:[]},defaultApi:"openai-responses",protocolRules:[{pattern:"old-two",api:"anthropic-messages"}]},]};
-      const statePath=join(agentDir,"extension-settings/pi-custom-provider.json"), authPath=join(agentDir,"auth.json"), modelsPath=join(agentDir,"models.json");
+      const statePath=join(agentDir,"extension-settings/pi-any-provider.json"), authPath=join(agentDir,"auth.json"), modelsPath=join(agentDir,"models.json");
       await writeFile(statePath,JSON.stringify(state,null,2)); await writeFile(authPath,JSON.stringify({AutoOne:{type:"api_key",key:"one-key"},AutoTwo:{type:"api_key",key:"two-key"}},null,2));
-      const registrations=[], handlers={}; const {default:extension}=await import(${JSON.stringify(join(import.meta.dir, "../src/pi-custom-provider-extension.ts"))});
+      const registrations=[], handlers={}; const {default:extension}=await import(${JSON.stringify(join(import.meta.dir, "../src/pi-any-provider-extension.ts"))});
       await extension({registerProvider(id,config){registrations.push({id,config});},unregisterProvider(){},registerCommand(){},on(name,handler){handlers[name]=handler;}});
       await handlers.session_start?.({}, {model:{provider:"AutoOne",id:"old-one"},hasUI:true,ui:{notify(message,type){notifications.push({message,type});}}});
       const runtime=await ModelRuntime.create({authPath,modelsPath,modelsStorePath:join(agentDir,"models-store.json"),refreshOnCreate:false});

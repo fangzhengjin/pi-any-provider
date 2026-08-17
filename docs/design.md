@@ -1,88 +1,88 @@
-# Minimal Generic Provider Extension Design
+# PI 任意供应商扩展设计
 
-## Scope
+## 范围
 
-The package registers providers configured through `/providers`. It delegates model requests to PI's built-in Anthropic Messages and OpenAI Responses implementations.
+扩展负责注册通过 `/providers` 配置的供应商。模型请求交给 PI 内置的 Anthropic Messages 和 OpenAI Responses 实现处理。
 
-## Single call path
+## 唯一调用路径
 
 ```text
-PI custom provider extension entry
-  → provider management orchestrator
-      → provider configuration store
-      → provider secret store
-      → model catalog service
-      → PI provider registration
+PI 任意供应商扩展入口
+  → 供应商管理编排器
+      → 供应商配置存储
+      → 供应商凭据存储
+      → 模型目录服务
+      → PI 供应商注册
 ```
 
-The orchestrator owns sequencing only. Each leaf owns its validation and file operations. No leaf calls another leaf.
+编排器只负责执行顺序。各叶子模块自行完成输入校验和文件操作，叶子模块之间不互相调用。
 
-## Stored state
+## 状态存储
 
-Provider settings and the interface-language preference live in one internal state file in the PI agent extension settings directory. The file is not a public configuration interface and is user-readable/writable only. API keys are written through PI's native credential storage and never enter extension state. State mutations use a cross-process mutation lock, reread the latest state inside that boundary, and replace the target atomically so concurrent provider refreshes preserve one another.
+供应商设置和界面语言偏好保存在 PI 扩展设置目录中的一个内部状态文件内。该文件不是公开配置入口，权限仅允许当前用户读写。API 密钥通过 PI 原生凭据存储写入，不进入扩展状态。状态变更使用跨进程写锁，并在锁内重新读取最新内容后原子替换目标文件，避免并发刷新互相覆盖。
 
-A configured provider contains:
+每个供应商包含：
 
-- stable provider identifier derived automatically from the display name and disambiguated against PI's provider and credential namespaces;
-- display name entered by the user;
-- normalized gateway root URL;
-- manual or discovered model source;
-- manual model identifiers or the last successfully discovered identifier snapshot;
-- default fallback request protocol;
-- exact model protocol settings and ordered wildcard fallback rules stored in one protocol-rule list;
-- interface language preference: automatic, English, or Simplified Chinese.
+- 根据显示名称自动生成、且不会与 PI 供应商和凭据命名空间冲突的稳定标识
+- 用户输入的显示名称
+- 规范化后的网关根地址
+- 手工或自动发现的模型来源
+- 手工模型标识，或最近一次成功发现的模型快照
+- 默认兜底请求协议
+- 精准模型协议设置和有序通配兜底规则
+- 界面语言偏好：自动、英文或简体中文
 
-## URL semantics
+## URL 规则
 
-The TUI accepts a gateway root URL. A trailing `/v1` is normalized away.
+界面接收网关根地址，并自动去掉末尾的 `/v1`。
 
-- discovery uses `<root>/v1/models`;
-- Anthropic Messages models use `<root>`;
-- OpenAI Responses models use `<root>/v1`.
+- 模型发现使用 `<root>/v1/models`
+- Anthropic Messages 使用 `<root>`
+- OpenAI Responses 使用 `<root>/v1`
 
-## Model construction
+## 模型构建
 
-Discovery accepts the standard `{ "data": [{ "id": "..." }] }` response only. Identifiers must be non-empty, unique, and free of control characters. Discover-backed registrations expose PI's native `refreshModels` callback. Cache-only refresh phases return the saved snapshot without network access; network phases use PI's resolved credential and shared abort signal. Successful startup refreshes update state and protocol profiles before publishing the new runtime list. For each provider, only the first network refresh in an extension instance is eligible for a localized info notification, and only when the final active model set has additions or removals; later refreshes, unchanged sets, and failures do not notify. Manual sources do not register a refresh callback.
+模型发现只接受标准的 `{ "data": [{ "id": "..." }] }` 响应。模型标识必须非空、唯一，且不能包含控制字符。自动发现来源会注册 PI 原生 `refreshModels` 回调：只读缓存阶段直接返回已保存快照，不访问网络；网络阶段使用 PI 已解析的凭据和共享取消信号。启动刷新成功后，扩展先更新状态和协议能力配置，再发布新的运行时模型列表。每个供应商只有当前扩展实例的首次网络刷新可以触发本地化通知，并且必须确实新增或移除了模型；后续刷新、列表未变化和刷新失败都不通知。手工模型来源不注册刷新回调。
 
-For an exact identifier found in PI's built-in catalog, the extension copies protocol-neutral fields: display name, reasoning flag, thinking level map, input types, context window, and maximum output. Costs remain zero because a gateway route does not prove upstream pricing. When the built-in model already uses the selected protocol, the extension also retains only that protocol's allowed compatibility fields. It never copies provider, URL, headers, or sampling parameters; cross-protocol compatibility fields are discarded.
+模型标识能在 PI 内置目录中精准匹配时，扩展会复制与协议无关的信息：显示名称、推理能力、思考等级映射、输入类型、上下文窗口和最大输出长度。兼容网关路由无法证明上游价格，因此费用固定为零。如果内置模型本身使用当前所选协议，只保留该协议允许继承的兼容字段。供应商、URL、请求头和采样参数不会复制，跨协议兼容字段会被丢弃。
 
-Unknown identifiers use conservative protocol-neutral metadata. Protocol compatibility is different: the extension mirrors every compatibility default actually resolved by PI's selected request implementation, then overlays same-protocol known-model values. New Anthropic-compatible models materialize adaptive thinking unless known same-protocol metadata explicitly opts out. Every model receives exactly one final protocol using three levels: an exact model setting first, the first matching ordered wildcard fallback second, and the provider default last.
+未知模型使用保守的协议无关元数据。协议兼容配置则以 PI 当前请求实现的实际默认值为基线，再叠加同协议已知模型值。新的 Anthropic 兼容模型默认启用自适应思考，除非同协议已知模型明确关闭。每个模型只会得到一个最终协议，优先级依次为精准模型设置、第一个命中的有序通配兜底规则、供应商默认协议。
 
-## Native model overrides
+## 原生模型覆盖
 
-Protocol compatibility profiles remain in PI's native `models.json` `modelOverrides` layer. The extension never stores a second copy in provider state. Anthropic Messages materializes its nine boolean fields. OpenAI Responses materializes seven boolean fields plus the `sessionAffinityFormat` enum, including PI's automatically detected OpenAI/OpenRouter default.
+协议兼容配置只保存在 PI 原生 `models.json` 的 `modelOverrides` 层，供应商状态中不保存第二份副本。Anthropic Messages 会写入 9 个布尔字段；OpenAI Responses 会写入 7 个布尔字段和 `sessionAffinityFormat` 枚举，其中包含 PI 自动判断的 OpenAI/OpenRouter 默认格式。
 
-The UI calls these settings model protocol capabilities. Users see each model's final protocol and custom-setting count before selection. The capability table has Capability and Current setting columns: values matching the resolved profile display as `Default (value)`; deviations display as forced or custom values. Selecting the default writes the concrete profile value rather than deleting it.
+界面将这些设置称为“模型协议能力”。选择模型前会显示最终请求协议和自定义项数量。能力表使用“能力 / 当前设置”两列：与解析后默认配置一致时显示 `默认（值）`，偏离时显示强制值或自定义值。选择默认值会写入具体值，而不是删除字段。
 
-The structured selectors reuse PI's selection primitive for keyboard behavior and scrolling. Wide terminals render display-width-aware columns; narrow terminals render the same fields on fixed-indentation detail rows. Long identifiers are truncated only inside their own field.
+结构化选择器复用 PI 的键盘选择和滚动能力。宽终端按实际显示宽度对齐列，窄终端将相同字段放在固定缩进的详情行中。长模型标识只会在自身字段内截断。
 
-The override store reads JSONC, changes only managed compatibility paths, preserves comments and unrelated providers, serializes plugin writers with a lock, keeps a 0600 rolling backup, fsyncs a temporary file, and atomically replaces `models.json`. Startup, provider save, discovery refresh, and protocol changes materialize all affected profiles in one file transaction. Model-level edits then call PI's existing model-registry refresh and rebind the active model. Failure restores the previous file and runtime state.
+模型覆盖存储读取 JSONC，只修改受管理的兼容配置路径，并保留注释和其他供应商。插件写入通过锁串行执行：先创建权限为 0600 的滚动备份，再对临时文件执行 fsync，最后原子替换 `models.json`。启动、供应商保存、发现刷新和协议变化都在单次文件事务中写入受影响模型的完整配置。模型级编辑完成后，调用 PI 现有模型注册表刷新并重新绑定活动模型；失败时恢复原文件和运行时状态。
 
-## TUI flow
+## 交互流程
 
-The `/providers` home screen has selectable Add provider and Language items followed by a non-selectable configured-provider divider and the provider list. Language labels are rendered in the current language: Chinese shows `中文（简体）` and `英文`; English shows `Chinese (Simplified)` and `English`.
+`/providers` 首页先显示可选择的“添加供应商”和“语言”，随后是不可选择的已配置供应商分隔线和供应商列表。语言名称随当前界面翻译：中文界面显示 `中文（简体）`、`英文`，英文界面显示 `Chinese (Simplified)`、`English`。
 
-Editing an existing provider collects URL, key, and default fallback protocol before committing. Empty URL/key values retain their current values. Escape cancels the whole edit. No changed values means no write or provider registration.
+编辑供应商时依次收集 URL、密钥和默认兜底协议。URL 或密钥留空表示保留当前值，Esc 取消整次编辑；没有变化时不写文件，也不重新注册供应商。
 
-The protocol-routing screen selects exact models from the provider's model list and accepts typed patterns only for wildcard fallbacks. Exact settings are not ordered; wildcard fallbacks can be moved and use first-match semantics.
+协议路由页从当前供应商模型列表中选择精准模型，只有通配兜底允许手工输入匹配模式。精准设置不排序；通配规则可以上下移动，并按首次命中生效。
 
-The provider action screen exposes edit connection, manage model list, configure model request protocols, manage advanced model protocol capabilities, refresh models, and delete. The model list shows final protocol and source. Removing a discovered model adds it to a persistent ignored list used by later refreshes; restoration performs discovery again. Exact protocol rules are cleaned, native capability settings are retained, and the active or final remaining model cannot be removed.
+供应商操作页提供连接编辑、模型列表管理、模型请求协议、高级协议能力、模型刷新和删除。模型列表显示最终协议和来源。移除自动发现模型时会加入持续忽略列表；恢复前重新执行发现。移除模型会清理精准协议规则，但保留原生能力设置。活动模型和最后一个模型不能移除。
 
-Updating the active provider or its native overrides reselects the same model after registration or refresh. Removing the active model or deleting its provider requires switching first. Destructive actions require confirmation.
+更新当前供应商或其原生覆盖后，会重新选择同一个模型。删除当前模型或供应商前必须先切换，破坏性操作需要确认。
 
-Automatic language selection first checks the operating-system UI language list, then terminal message locales, JavaScript Intl, and finally English. macOS, Windows, and Linux/Unix use platform-specific sources. Explicit language selection is persisted and takes precedence immediately without reload.
+自动语言选择依次检查操作系统界面语言、终端消息语言、JavaScript Intl，最后回退到英文。macOS、Windows 和 Linux/Unix 分别使用对应的平台来源。手工选择会持久保存，并立即覆盖自动结果，无需重新加载。
 
-## Failure behavior
+## 失败处理
 
-- Invalid configuration prevents the affected operation and reports the exact problem.
-- Failed discovery throws into PI's refresh result and does not publish an empty or fabricated model list. PI's background startup refresh keeps this non-blocking; user-triggered model refresh may display PI's cached-model warning.
-- Automatic refresh commits are serialized across providers. A state-save failure rolls back the profile write; an active configured model omitted by the gateway remains in the snapshot until the user switches away and a later refresh removes it.
-- A failed edit leaves the previous registered provider and stored configuration active.
-- API keys are never included in thrown messages.
-- Native protocol-profile writes keep a backup and restore the previous file and runtime if profile materialization, registration, refresh, or rebind fails.
-- Known user-facing errors are translated at the command boundary; unknown PI, filesystem, and network causes retain their original diagnostic text.
-- Non-interactive modes report that `/providers` requires interactive mode rather than attempting prompts.
+- 配置无效时阻止当前操作，并报告具体问题。
+- 模型发现失败会进入 PI 刷新结果，不会发布空列表或伪造模型。PI 启动时的后台刷新不会阻塞界面；用户主动刷新模型时，可能看到 PI 的缓存回退提示。
+- 不同供应商的自动刷新提交会串行执行。状态保存失败时回滚协议能力配置；网关暂时遗漏活动模型时先保留该模型，用户切换后再由后续刷新移除。
+- 编辑失败时继续使用原有注册和配置。
+- 抛出的错误不得包含 API 密钥。
+- 原生协议能力写入保留备份；配置写入、供应商注册、刷新或活动模型重绑失败时恢复原文件和运行时。
+- 已知用户错误在命令边界翻译；未知的 PI、文件系统和网络错误保留原始诊断信息。
+- 非交互模式只报告 `/providers` 需要交互模式，不尝试发起输入。
 
-## Explicit exclusions
+## 明确不做
 
-No Chat Completions, OAuth, pricing endpoint, provider-brand rules, model capability probes, independent TTL/Model Store catalog, general configuration migration framework, or custom stream implementation. The protocol-capability editor is limited to the selected protocol's complete compatibility contract and writes PI's native override format rather than introducing a plugin-specific compatibility schema.
+不支持 Chat Completions、OAuth、价格接口、供应商品牌规则、模型能力探测、独立 TTL/Model Store 目录、通用配置迁移框架或自定义流式实现。协议能力编辑器只覆盖所选协议的完整兼容契约，并写入 PI 原生覆盖格式，不引入插件专用兼容配置。

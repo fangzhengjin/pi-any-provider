@@ -10,12 +10,12 @@ afterEach(async () => {
 });
 
 async function createIsolatedPiAgent(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "pi-custom-provider-test-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-any-provider-test-"));
   temporaryDirectories.push(root);
   const agentDir = join(root, "agent");
   await mkdir(join(agentDir, "extension-settings"), { recursive: true });
   await writeFile(
-    join(agentDir, "extension-settings", "pi-custom-provider.json"),
+    join(agentDir, "extension-settings", "pi-any-provider.json"),
     `${JSON.stringify({
       version: 1,
       language: "en",
@@ -37,25 +37,25 @@ async function createIsolatedPiAgent(): Promise<string> {
     `${JSON.stringify({ "integration-provider": { type: "api_key", key: "integration-test-key" } }, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
-  await chmod(join(agentDir, "extension-settings", "pi-custom-provider.json"), 0o600);
+  await chmod(join(agentDir, "extension-settings", "pi-any-provider.json"), 0o600);
   return agentDir;
 }
 
 describe("extension integration", () => {
   test("adds a manual provider through the TUI without storing the key in extension state", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pi-custom-provider-tui-test-"));
+    const root = await mkdtemp(join(tmpdir(), "pi-any-provider-tui-test-"));
     temporaryDirectories.push(root);
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "extension-settings"), { recursive: true });
     await writeFile(
-      join(agentDir, "extension-settings", "pi-custom-provider.json"),
+      join(agentDir, "extension-settings", "pi-any-provider.json"),
       `${JSON.stringify({ version: 1, language: "en", providers: [] }, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     const script = `
       import { readFile, stat } from "node:fs/promises";
       import { getKeybindings } from "@earendil-works/pi-tui";
-      import extension from ${JSON.stringify(join(import.meta.dir, "../src/pi-custom-provider-extension.ts"))};
+      import extension from ${JSON.stringify(join(import.meta.dir, "../src/pi-any-provider-extension.ts"))};
       const registrations = [];
       let command;
       const pi = {
@@ -114,7 +114,7 @@ describe("extension integration", () => {
         },
       };
       await command.handler("", context);
-      const statePath = ${JSON.stringify(join(agentDir, "extension-settings", "pi-custom-provider.json"))};
+      const statePath = ${JSON.stringify(join(agentDir, "extension-settings", "pi-any-provider.json"))};
       const authPath = ${JSON.stringify(join(agentDir, "auth.json"))};
       const stateText = await readFile(statePath, "utf8");
       const authText = await readFile(authPath, "utf8");
@@ -181,7 +181,7 @@ describe("extension integration", () => {
     const agentDir = await createIsolatedPiAgent();
     const script = `
       import { readFile } from "node:fs/promises";
-      import extension from ${JSON.stringify(join(import.meta.dir, "../src/pi-custom-provider-extension.ts"))};
+      import extension from ${JSON.stringify(join(import.meta.dir, "../src/pi-any-provider-extension.ts"))};
       const registrations = [];
       const commands = [];
       const pi = {

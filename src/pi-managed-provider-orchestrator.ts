@@ -32,7 +32,7 @@ import { bindPiManagedProviderCredentials } from "./pi-managed-provider-credenti
 import { bindPiManagedProviderRegistration } from "./pi-managed-provider-registration.js";
 import { bindPiManagedProviderState } from "./pi-managed-provider-state.js";
 
-const PI_MANAGED_PROVIDER_SETTINGS_PATH = join(getAgentDir(), "extension-settings", "pi-custom-provider.json");
+const PI_MANAGED_PROVIDER_SETTINGS_PATH = join(getAgentDir(), "extension-settings", "pi-any-provider.json");
 const PI_MANAGED_PROVIDER_MODELS_PATH = join(getAgentDir(), "models.json");
 const PI_MANAGED_PROVIDER_DISCOVERY_TIMEOUT_MS = 15_000;
 const PI_MANAGED_PROVIDER_ORCHESTRATOR_PATH = fileURLToPath(import.meta.url);

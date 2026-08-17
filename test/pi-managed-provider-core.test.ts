@@ -83,8 +83,8 @@ describe("provider identifiers", () => {
   });
 
   test("uses a safe fallback and suffixes occupied identifiers", () => {
-    const occupied = new Set(["custom-provider", "custom-provider-2"]);
-    expect(createManagedProviderIdentifier("工作网关", (identifier) => occupied.has(identifier))).toBe("custom-provider-3");
+    const occupied = new Set(["any-provider", "any-provider-2"]);
+    expect(createManagedProviderIdentifier("工作网关", (identifier) => occupied.has(identifier))).toBe("any-provider-3");
   });
 });
 

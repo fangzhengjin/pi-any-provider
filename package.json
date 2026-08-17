@@ -1,9 +1,17 @@
 {
-  "name": "pi-custom-provider",
+  "name": "pi-any-provider",
   "version": "0.1.0",
-  "description": "Minimal TUI-managed custom providers for PI",
+  "description": "Manage any Anthropic Messages or OpenAI Responses compatible provider in PI",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fangzhengjin/pi-any-provider.git"
+  },
+  "homepage": "https://github.com/fangzhengjin/pi-any-provider#readme",
+  "bugs": {
+    "url": "https://github.com/fangzhengjin/pi-any-provider/issues"
+  },
   "files": [
     "src",
     "README.md",
@@ -19,7 +27,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/pi-custom-provider-extension.ts"
+      "./src/pi-any-provider-extension.ts"
     ]
   },
   "peerDependencies": {

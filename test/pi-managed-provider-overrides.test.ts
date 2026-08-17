@@ -10,12 +10,12 @@ afterEach(async () => {
 });
 
 async function createOverrideAgent(): Promise<{ agentDir: string; originalModels: string }> {
-  const root = await mkdtemp(join(tmpdir(), "pi-custom-provider-overrides-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-any-provider-overrides-"));
   temporaryDirectories.push(root);
   const agentDir = join(root, "agent");
   await mkdir(join(agentDir, "extension-settings"), { recursive: true });
   await writeFile(
-    join(agentDir, "extension-settings", "pi-custom-provider.json"),
+    join(agentDir, "extension-settings", "pi-any-provider.json"),
     `${JSON.stringify({
       version: 1,
       language: "en",
@@ -99,7 +99,7 @@ describe("native model override orchestration", () => {
         selectedModel,
         modelsText: await readFile(modelsPath, "utf8"),
         mode: (await stat(modelsPath)).mode & 0o777,
-        backupMode: (await stat(modelsPath + ".pi-custom-provider-backup")).mode & 0o777,
+        backupMode: (await stat(modelsPath + ".pi-any-provider-backup")).mode & 0o777,
       }));
     `;
     const result = Bun.spawnSync([process.execPath, "-e", script], {
@@ -201,7 +201,7 @@ describe("native model override orchestration", () => {
       const orchestrator = createPiManagedProviderOrchestrator();
       await orchestrator.load(pi);
       await orchestrator.setLanguage("zh-CN");
-      const state = JSON.parse(await readFile(${JSON.stringify(join(agentDir, "extension-settings", "pi-custom-provider.json"))}, "utf8"));
+      const state = JSON.parse(await readFile(${JSON.stringify(join(agentDir, "extension-settings", "pi-any-provider.json"))}, "utf8"));
       process.stdout.write(JSON.stringify({ state, snapshot: orchestrator.snapshot() }));
     `;
     const result = Bun.spawnSync([process.execPath, "-e", script], {

@@ -72,7 +72,7 @@ export function createManagedProviderIdentifier(
     .replace(/-+$/gu, "");
   const stem = PROVIDER_ID_PATTERN.test(normalizedName)
     ? normalizedName
-    : normalizedStem || "custom-provider";
+    : normalizedStem || "any-provider";
   let identifier = stem;
   for (let suffix = 2; isUnavailable(identifier); suffix += 1) {
     identifier = `${stem}-${suffix}`;

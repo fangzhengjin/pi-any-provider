@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "pi-custom-provider",
+      "name": "pi-any-provider",
       "dependencies": {
         "jsonc-parser": "^3.3.1",
       },

@@ -1,10 +1,10 @@
-# PI 自定义供应商
+# PI 任意供应商
 
-用于在 PI 中连接和管理自定义模型网关。安装后运行 `/providers`，即可添加供应商、发现模型和配置请求协议，不需要手工编辑 JSON 文件。
+用于在 PI 中连接和管理任意兼容模型网关。安装后运行 `/providers`，即可添加供应商、发现模型和配置请求协议，不需要手工编辑 JSON 文件。
 
 ## 功能
 
-- 管理多个自定义供应商
+- 管理多个兼容供应商
 - 手工添加模型，或通过 `/v1/models` 自动发现
 - 为不同模型选择 Anthropic Messages 或 OpenAI Responses
 - 使用精准规则和 `*`、`?` 通配规则分配请求协议
@@ -22,13 +22,13 @@
 为当前用户全局安装：
 
 ```bash
-pi install git:github.com/fangzhengjin/pi-custom-provider
+pi install git:github.com/fangzhengjin/pi-any-provider
 ```
 
 也可以使用完整的 HTTPS 地址：
 
 ```bash
-pi install https://github.com/fangzhengjin/pi-custom-provider
+pi install https://github.com/fangzhengjin/pi-any-provider
 ```
 
 PI 会克隆仓库并自动安装运行依赖。安装完成后重新启动 PI，再执行 `/providers`。
@@ -42,7 +42,7 @@ pi update --extensions
 卸载：
 
 ```bash
-pi remove git:github.com/fangzhengjin/pi-custom-provider
+pi remove git:github.com/fangzhengjin/pi-any-provider
 ```
 
 ### 临时试用
@@ -50,7 +50,7 @@ pi remove git:github.com/fangzhengjin/pi-custom-provider
 无需安装即可运行：
 
 ```bash
-pi -e git:github.com/fangzhengjin/pi-custom-provider
+pi -e git:github.com/fangzhengjin/pi-any-provider
 ```
 
 ### 关于 npm

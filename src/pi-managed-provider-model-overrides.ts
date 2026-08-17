@@ -233,7 +233,7 @@ async function commitManagedProviderModelsConfigChange(
   transform: (content: string | undefined) => string,
 ): Promise<ManagedProviderModelOverrideWrite> {
   await mkdir(dirname(path), { recursive: true, mode: MODELS_CONFIG_DIRECTORY_MODE });
-  const release = await acquireModelsConfigLock(`${path}.pi-custom-provider.lock`);
+  const release = await acquireModelsConfigLock(`${path}.pi-any-provider.lock`);
   let original: { existed: boolean; content?: string };
   let next: string;
   try {
@@ -241,7 +241,7 @@ async function commitManagedProviderModelsConfigChange(
     next = transform(original.content);
     const originalContent = original.content ?? DEFAULT_MODELS_CONFIG;
     if (next === originalContent) return { changed: false, rollback: async () => {} };
-    await writeAtomicModelsConfig(`${path}.pi-custom-provider-backup`, originalContent);
+    await writeAtomicModelsConfig(`${path}.pi-any-provider-backup`, originalContent);
     await writeAtomicModelsConfig(path, next);
   } catch (error) {
     throw new Error(`Failed to update models.json: ${error instanceof Error ? error.message : String(error)}`);
@@ -252,7 +252,7 @@ async function commitManagedProviderModelsConfigChange(
   return {
     changed: true,
     rollback: async () => {
-      const rollbackRelease = await acquireModelsConfigLock(`${path}.pi-custom-provider.lock`);
+      const rollbackRelease = await acquireModelsConfigLock(`${path}.pi-any-provider.lock`);
       try {
         const current = await readOptionalFile(path);
         if ((current.content ?? DEFAULT_MODELS_CONFIG) !== next) {
