@@ -1,138 +1,144 @@
-# PI Custom Provider
+# PI 自定义供应商
 
-A minimal PI extension for managing custom model gateways from the terminal UI.
+一个用于管理自定义模型网关的 PI 扩展，所有配置都在终端交互界面中完成。
 
-It delegates requests to PI's built-in Anthropic Messages and OpenAI Responses implementations. The extension does not implement its own streaming protocol, pricing service, model-brand detection, or competing compatibility format. Advanced options edit PI's native model overrides.
+模型请求仍由 PI 内置的 Anthropic Messages 和 OpenAI Responses 实现处理。本扩展不重复实现流式传输、价格服务、模型品牌识别或另一套兼容配置；高级设置直接写入 PI 原生模型覆盖配置。
 
-## Features
+## 功能
 
-- `/providers` management UI
-- Multiple custom providers
-- Manual model identifiers or standard `/v1/models` discovery
-- Anthropic Messages and OpenAI Responses
-- Exact model protocols, ordered `*` and `?` wildcard fallbacks, and one provider fallback protocol
-- Hidden API-key input stored through PI's native credential storage
-- Empty URL or key input keeps the current value
-- Automatic PI built-in capability reuse without cross-protocol compatibility leakage
-- Complete native compatibility profiles materialized for each final request protocol
-- Persistent removal and restoration of unusable discovered models
-- Background `/v1/models` refresh through PI's native startup catalog lifecycle
-- Automatic operating-system language detection plus English and Simplified Chinese
+- 通过 `/providers` 管理供应商
+- 支持多个自定义供应商
+- 手工添加模型标识，或通过标准 `/v1/models` 自动发现
+- 支持 Anthropic Messages 和 OpenAI Responses
+- 支持精准模型协议、有序 `*`/`?` 通配兜底和供应商默认协议
+- API 密钥隐藏输入，并由 PI 原生凭据存储管理
+- URL 或密钥留空时保留当前值
+- 复用 PI 已知模型能力，不携带跨协议兼容字段
+- 按最终请求协议写入完整的原生兼容配置
+- 可移除、持续忽略并恢复自动发现的模型
+- PI 启动后在后台刷新 `/v1/models`
+- 自动检测操作系统语言，也可手工选择中文或英文
 
-Chat Completions is intentionally unsupported.
+不支持 Chat Completions。
 
-## Install
+## 安装
 
-### GitHub (recommended)
+### 从 GitHub 安装（推荐）
 
-Install globally for the current user:
+为当前用户全局安装：
 
 ```bash
 pi install git:github.com/fangzhengjin/pi-custom-provider
 ```
 
-The full HTTPS URL works too:
+也可以使用完整的 HTTPS 地址：
 
 ```bash
 pi install https://github.com/fangzhengjin/pi-custom-provider
 ```
 
-PI clones the repository and installs its runtime dependencies automatically. Restart PI after installation, then run `/providers`.
+PI 会克隆仓库并自动安装运行依赖。安装完成后重新启动 PI，再执行 `/providers`。
 
-Update Git-installed packages:
+更新通过 Git 安装的扩展：
 
 ```bash
 pi update --extensions
 ```
 
-Remove the package:
+卸载：
 
 ```bash
 pi remove git:github.com/fangzhengjin/pi-custom-provider
 ```
 
-### Try without installing
+### 临时试用
+
+无需安装即可运行：
 
 ```bash
 pi -e git:github.com/fangzhengjin/pi-custom-provider
 ```
 
-### Local development
+### 本地开发
 
-From a local checkout:
+从本地仓库安装：
 
 ```bash
 pi install /absolute/path/to/pi-custom-provider
 ```
 
-A local install points directly at that directory, so new PI processes use the current checkout without reinstalling. Avoid installing both the local path and GitHub source at the same time, or PI may load the extension twice.
+本地安装会直接引用这个目录，新启动的 PI 会使用当前工作区代码，无需重复安装。不要同时安装本地路径和 GitHub 来源，否则 PI 可能重复加载扩展。
 
-## Use
+### 是否需要发布到 npm
 
-Run:
+不需要。PI 官方支持直接从 Git 仓库安装，并会自动安装 `dependencies`。只有需要 `npm:pi-custom-provider` 这种短安装命令、标准语义化版本分发或 PI 包画廊曝光时，才需要发布到 npm。
+
+## 使用
+
+运行：
 
 ```text
 /providers
 ```
 
-The first item adds a provider. The second changes the interface language. Configured providers appear below them.
+首页前两项分别用于添加供应商和切换界面语言，下面列出已配置的供应商。
 
-Language defaults to automatic detection. The extension checks the operating-system UI language, terminal message locale, and JavaScript Intl in that order, with English as the final fallback. You can explicitly select English or Simplified Chinese. Language names follow the current interface language, and changes apply immediately.
+语言默认自动检测，顺序为操作系统界面语言、终端消息语言和 JavaScript Intl，最后回退到英文。也可以手工选择中文或英文，切换后立即生效。
 
-Enter a provider name first. The extension creates the internal PI identifier automatically, including a numeric suffix when another provider already uses the same name-derived identifier.
+添加供应商时先输入名称。扩展会自动生成 PI 内部标识；如果标识已被占用，会追加数字后缀。
 
-Then enter a gateway root URL such as:
+然后输入网关根地址，例如：
 
 ```text
 https://gateway.example.com
 ```
 
-The extension derives:
+扩展会自动派生以下地址：
 
-- model discovery: `/v1/models`
-- Anthropic Messages: `/v1/messages`
-- OpenAI Responses: `/v1/responses`
+- 模型发现：`/v1/models`
+- Anthropic Messages：`/v1/messages`
+- OpenAI Responses：`/v1/responses`
 
-The protocol selected during setup is the final provider fallback. Routing uses this priority:
+添加时选择的协议是供应商的最终兜底协议。实际请求协议按以下顺序解析：
 
-1. an exact model setting selected from the provider's model list;
-2. the first matching ordered wildcard fallback containing `*` or `?`;
-3. the provider fallback protocol.
+1. 从当前模型列表中选择的精准模型设置
+2. 第一个命中的有序 `*` 或 `?` 通配兜底规则
+3. 供应商默认协议
 
-Only wildcard fallbacks require typing a pattern. Exact model settings are always selected from the current model list.
+只有通配兜底规则需要手工输入匹配模式；精准规则必须从当前模型列表中选择。
 
-When editing an existing provider:
+编辑现有供应商时：
 
-- submit an empty URL to keep the current URL;
-- submit an empty API key to keep the current key;
-- select “Keep current” to keep the current request protocol;
-- if every value is unchanged, nothing is written or re-registered.
+- URL 留空：保留当前地址
+- API 密钥留空：保留当前密钥
+- 协议选择“保持当前”：保留当前默认协议
+- 所有值都没有变化：不写文件，也不重新注册供应商
 
-The active provider can be edited or refreshed. PI automatically reselects the same model after registration changes. Switch providers only before deleting the active provider or removing the active model from its model list.
+当前正在使用的供应商可以编辑或刷新。注册发生变化后，PI 会重新选择同一个模型。只有删除当前供应商或从列表移除当前模型时，才需要先切换到其他模型。
 
-**Manage model list** shows every model's final request protocol and source. Manual models can be removed directly. Discovered models are removed and added to an ignored list so future `/v1/models` refreshes do not restore image-generation, embedding, reranking, speech, or other unusable entries. Ignored models can be restored after the gateway confirms they are still published. The active model and the provider's final remaining model cannot be removed.
+“管理模型列表”会显示每个模型最终使用的请求协议和来源。手工模型可以直接移除；自动发现的模型在移除后会加入忽略列表，后续刷新 `/v1/models` 时不会重新加入。图片生成、`embedding`（嵌入）、`rerank`（重排）、语音等不适合普通对话的模型都由用户明确移除，扩展不会根据名称猜测类型。恢复模型时会先确认网关仍然提供该模型。当前活动模型和供应商的最后一个模型不能移除。
 
-On normal interactive startup, discovered providers participate in PI's native background catalog refresh. Successful responses atomically update the saved snapshot, remove obsolete exact protocol rules, and materialize profiles for new models. When the first network refresh changes a provider's final model set, PI shows one localized info notification with added and removed counts; unchanged providers, failures, and later refreshes stay quiet. The active model is retained if the gateway temporarily omits it. A failed or timed-out refresh keeps the previous models and does not interrupt startup; opening PI's model selector later may show PI's standard cached-model warning. Manual model sources never perform startup discovery. `pi --list-models` remains cache-only and shows the last successful snapshot.
+PI 正常启动后，使用自动发现来源的供应商会参与原生后台目录刷新。刷新成功时，扩展会原子更新模型快照、清理已失效的精准协议规则，并为新增模型写入协议能力配置。首次网络刷新如果改变了最终模型集合，会按供应商显示一条新增/移除数量通知；列表没有变化、刷新失败或后续再次刷新都不会通知。如果网关暂时漏掉当前活动模型，扩展会先保留它。刷新失败或超时不会阻断启动，也不会改动旧列表；之后打开 PI 模型选择器时，可能看到 PI 自带的缓存回退提示。手工模型来源不会在启动时自动发现。`pi --list-models` 只读取上次成功保存的快照，不会主动请求网关。
 
-## Model metadata
+## 模型信息
 
-Exact model identifiers reuse PI's known protocol-neutral capabilities, including reasoning, supported inputs, context window, and maximum output. If PI already knows the model under the selected protocol, compatible protocol metadata is also retained.
+如果模型标识能在 PI 内置目录中精准匹配，扩展会复用与协议无关的信息，包括推理能力、输入类型、上下文窗口和最大输出长度。同一模型原本就使用当前协议时，也会保留该协议允许继承的兼容参数。
 
-Unknown models use conservative defaults. Costs remain zero because a custom gateway route does not establish upstream pricing.
+未知模型使用保守默认值。自定义网关无法证明上游价格，因此费用固定为零。
 
-Advanced settings appear as **Model protocol capabilities (advanced)**. The extension materializes PI's effective compatibility parameters for each final protocol into native model overrides instead of relying only on request-time fallbacks. Anthropic Messages includes adaptive thinking, temperature, strict tools, cache behavior, tool references, and related fields. OpenAI Responses includes developer messages, session-affinity format, strict and grammar tools, additional tools, cache behavior, and tool search.
+高级设置入口为“模型协议能力（高级）”。扩展会把每个模型最终协议的实际兼容参数写入 PI 原生模型覆盖，而不是只依赖请求时的隐式回退。Anthropic Messages 包括自适应思考、温度、严格工具、缓存行为和工具引用等设置；OpenAI Responses 包括 `developer` 角色消息、会话亲和格式、严格工具、语法工具、附加工具、缓存和工具搜索。
 
-The model picker shows aligned Model, Request protocol, and Settings columns on wide terminals, then switches to fixed-indentation detail rows on narrow terminals. Each capability shows `Default (value)` when it matches the protocol and known-model profile; deviations show a forced or custom value. Switching protocol removes the previous protocol's fields and materializes the new profile. For new Anthropic-compatible models, adaptive thinking defaults to enabled unless same-protocol model metadata explicitly opts out.
+宽终端下，模型选择页使用“模型 / 请求协议 / 设置”对齐显示；窄终端会自动切换为固定缩进的详情行。能力值与协议及已知模型默认配置一致时显示 `默认（值）`，偏离时显示强制值或自定义值。切换协议会删除旧协议字段，再写入新协议能力配置。新的 Anthropic 兼容模型默认开启自适应思考，除非同协议的已知模型信息明确关闭。
 
-The extension edits `~/.pi/agent/models.json` with JSONC path-level changes, preserving comments, formatting, unrelated providers, and unknown legal settings. It keeps a 0600 rolling backup at `models.json.pi-custom-provider-backup`, refreshes only the affected provider, and reselects the active model. If refresh fails, the previous file and runtime are restored.
+扩展通过 JSONC 路径级编辑修改 `~/.pi/agent/models.json`，保留注释、格式、其他供应商和未知但合法的配置。写入前会在 `models.json.pi-custom-provider-backup` 创建权限为 0600 的滚动备份，只刷新受影响的供应商，并重新选择当前活动模型。刷新失败时会恢复原文件和运行时状态。
 
-## Internal state
+## 内部状态
 
-The extension maintains provider definitions, discovered-model snapshots, ignored model identifiers, and the language preference in an internal state file under PI's extension settings directory. It is not a supported user configuration interface. API keys never enter that file; PI stores them in its native credential store. Materialized protocol compatibility profiles and user exceptions remain in PI's native `models.json`.
+供应商定义、自动发现快照、已忽略模型和语言偏好保存在 PI 扩展设置目录的内部状态文件中。该文件不是公开配置入口。API 密钥不会进入插件状态，而是由 PI 原生凭据存储管理；协议能力配置和用户例外设置仍保存在 PI 原生 `models.json` 中。
 
-## Development
+## 开发
 
-This project uses Bun.
+项目统一使用 Bun。
 
 ```bash
 bun install
