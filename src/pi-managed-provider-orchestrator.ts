@@ -52,6 +52,16 @@ type ManagedProviderRefreshContext = Parameters<ManagedProviderRefreshModels>[0]
 
 type ManagedProviderActiveModel = { provider: string; id: string };
 
+export interface ManagedProviderAutomaticRefreshChange {
+  providerName: string;
+  added: number;
+  removed: number;
+}
+
+type ManagedProviderAutomaticRefreshListener = (
+  change: ManagedProviderAutomaticRefreshChange,
+) => void;
+
 function hasSameManagedProviderRefreshConfiguration(
   current: ManagedProviderDefinition,
   expected: ManagedProviderDefinition,
@@ -111,9 +121,15 @@ function createManagedProviderProtocolProfileEntries(
 class PiManagedProviderOrchestrator {
   private activeModel: ManagedProviderActiveModel | undefined;
   private automaticRefreshCommit: Promise<void> = Promise.resolve();
+  private automaticRefreshChangeListener: ManagedProviderAutomaticRefreshListener | undefined;
+  private readonly initialNetworkRefreshes = new Set<string>();
 
   setActiveModel(model: ManagedProviderActiveModel | undefined): void {
     this.activeModel = model ? { ...model } : undefined;
+  }
+
+  setAutomaticRefreshChangeListener(listener: ManagedProviderAutomaticRefreshListener | undefined): void {
+    this.automaticRefreshChangeListener = listener;
   }
 
   private refreshModelsFor(provider: ManagedProviderDefinition): ManagedProviderRefreshModels | undefined {
@@ -143,6 +159,7 @@ class PiManagedProviderOrchestrator {
   private async commitAutomaticallyRefreshedProvider(
     expected: ManagedProviderDefinition,
     discoveredModelIds: readonly string[],
+    notifyChange: boolean,
   ): Promise<ReturnType<typeof buildManagedProviderModels>> {
     const latest = piManagedProviderState.snapshot().providers.find((entry) => entry.id === expected.id);
     if (!latest) throw new ManagedProviderLocalizedError("unknownProvider", { provider: expected.id });
@@ -152,6 +169,10 @@ class PiManagedProviderOrchestrator {
     const activeModel = this.activeModel ? { ...this.activeModel } : undefined;
     const next = createAutomaticallyRefreshedProvider(latest, discoveredModelIds, activeModel);
     const models = buildManagedProviderModels(next, next.modelSource.modelIds);
+    const previousModelIds = new Set(latest.modelSource.modelIds);
+    const nextModelIds = new Set(next.modelSource.modelIds);
+    const added = next.modelSource.modelIds.filter((modelId) => !previousModelIds.has(modelId)).length;
+    const removed = latest.modelSource.modelIds.filter((modelId) => !nextModelIds.has(modelId)).length;
     if (JSON.stringify(next.modelSource) === JSON.stringify(latest.modelSource)
       && JSON.stringify(next.protocolRules) === JSON.stringify(latest.protocolRules)) {
       return models;
@@ -173,7 +194,6 @@ class PiManagedProviderOrchestrator {
           providers: currentState.providers.map((entry) => entry.id === expected.id ? refreshed : entry),
         };
       });
-      return models;
     } catch (error) {
       try {
         await profileWrite.rollback();
@@ -185,6 +205,10 @@ class PiManagedProviderOrchestrator {
       }
       throw error;
     }
+    if (notifyChange && (added > 0 || removed > 0)) {
+      this.automaticRefreshChangeListener?.({ providerName: next.name, added, removed });
+    }
+    return models;
   }
 
   private async refreshDiscoveredProvider(
@@ -196,6 +220,8 @@ class PiManagedProviderOrchestrator {
     if (provider.modelSource.type !== "discover" || !context.allowNetwork) {
       return buildManagedProviderModels(provider, provider.modelSource.modelIds);
     }
+    const notifyChange = !this.initialNetworkRefreshes.has(providerId);
+    this.initialNetworkRefreshes.add(providerId);
     if (context.credential?.type !== "api_key" || !context.credential.key) {
       throw new Error(`Automatic model refresh failed for ${providerId}: no API key is available`);
     }
@@ -207,7 +233,7 @@ class PiManagedProviderOrchestrator {
       );
       context.signal.throwIfAborted();
       return await this.enqueueAutomaticRefreshCommit(() =>
-        this.commitAutomaticallyRefreshedProvider(provider, discoveredModelIds)
+        this.commitAutomaticallyRefreshedProvider(provider, discoveredModelIds, notifyChange)
       );
     } catch (error) {
       throw new Error(

@@ -68,6 +68,8 @@ describe("localization", () => {
     expect(chinese.t("languageEnglish")).toBe("英文");
     expect(english.t("languageChinese")).toBe("Chinese (Simplified)");
     expect(english.t("languageEnglish")).toBe("English");
+    expect(chinese.t("automaticRefreshChanged", { name: "AIGW", added: 2, removed: 1 })).toBe("AIGW 模型列表已更新：新增 2，移除 1");
+    expect(english.t("automaticRefreshChanged", { name: "AIGW", added: 2, removed: 1 })).toBe("AIGW model list updated: 2 added, 1 removed");
   });
 });
 
