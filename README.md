@@ -23,17 +23,49 @@ Chat Completions is intentionally unsupported.
 
 ## Install
 
+### GitHub (recommended)
+
+Install globally for the current user:
+
+```bash
+pi install git:github.com/fangzhengjin/pi-custom-provider
+```
+
+The full HTTPS URL works too:
+
+```bash
+pi install https://github.com/fangzhengjin/pi-custom-provider
+```
+
+PI clones the repository and installs its runtime dependencies automatically. Restart PI after installation, then run `/providers`.
+
+Update Git-installed packages:
+
+```bash
+pi update --extensions
+```
+
+Remove the package:
+
+```bash
+pi remove git:github.com/fangzhengjin/pi-custom-provider
+```
+
+### Try without installing
+
+```bash
+pi -e git:github.com/fangzhengjin/pi-custom-provider
+```
+
+### Local development
+
 From a local checkout:
 
 ```bash
 pi install /absolute/path/to/pi-custom-provider
 ```
 
-Or try it without installing:
-
-```bash
-pi -e /absolute/path/to/pi-custom-provider
-```
+A local install points directly at that directory, so new PI processes use the current checkout without reinstalling. Avoid installing both the local path and GitHub source at the same time, or PI may load the extension twice.
 
 ## Use
 
